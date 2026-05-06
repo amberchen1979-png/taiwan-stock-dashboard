@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>台股分析看板</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080d18;--bg2:#0f1624;--bg3:#151e30;--bg4:#1a2540;
+  --border:#1a2840;--border2:#243554;--border3:#2d4268;
+  --text:#dde6f0;--text2:#7a9ab8;--text3:#3d5570;
+  --accent:#00c9e8;--accent2:#0088bb;
+  --up:#00e676;--dn:#ff4f4f;--warn:#ffab00;
+  --card-r:10px;
+  --mono:'JetBrains Mono',monospace;
+  --sans:'Noto Sans TC',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;min-height:100vh}
+
+/* ── HEADER ── */
+.hdr{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 18px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:200;gap:10px;flex-wrap:wrap}
+.logo{display:flex;align-items:center;gap:9px}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 7px var(--accent);animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.logo-text{font-size:15px;font-weight:700;letter-spacing:.04em}
+.logo-sub{font-size:10px;color:var(--text3);font-family:var(--mono)}
+.hdr-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.clock{font-family:var(--mono);font-size:12px;color:var(--accent);background:rgba(0,201,232,.07);border:1px solid rgba(0,201,232,.18);padding:4px 10px;border-radius:6px}
+.mode-grp{display:flex;background:var(--bg3);border:1px solid var(--border);border-radius:7px;overflow:hidden}
+.mode-btn{padding:5px 13px;font-size:12px;cursor:pointer;border:none;background:transparent;color:var(--text2);font-family:var(--sans);transition:all .2s}
+.mode-btn.active{background:var(--accent2);color:#fff;font-weight:500}
+.icon-btn{padding:5px 12px;font-size:12px;background:transparent;border:1px solid var(--border2);color:var(--text2);border-radius:7px;cursor:pointer;font-family:var(--sans);transition:all .2s;display:flex;align-items:center;gap:5px}
+.icon-btn:hover,.icon-btn.loading-btn{border-color:var(--accent);color:var(--accent)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{animation:spin .7s linear infinite;display:inline-block}
+
+/* ── API STATUS ── */
+.api-bar{padding:8px 18px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.api-item{font-size:11px;color:var(--text3);display:flex;align-items:center;gap:5px}
+.api-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;transition:all .3s}
+.api-dot.ok{background:var(--up);box-shadow:0 0 5px var(--up);animation:blink 2s infinite}
+.api-dot.warn{background:var(--warn)}.api-dot.err{background:var(--dn)}.api-dot.off{background:var(--text3)}
+.api-label{color:var(--text2)}
+.api-msg{margin-left:auto;font-size:10px;color:var(--text3);font-family:var(--mono)}
+.src-live{font-size:8px;padding:1px 5px;border-radius:2px;background:rgba(0,230,118,.1);color:var(--up);font-family:var(--mono)}
+.src-mock{font-size:8px;padding:1px 5px;border-radius:2px;background:rgba(61,85,112,.15);color:var(--text3);font-family:var(--mono)}
+
+/* ── LOG ── */
+.log-toggle{font-size:10px;color:var(--text3);cursor:pointer;padding:6px 18px;display:flex;align-items:center;gap:5px;border-bottom:1px solid var(--border);user-select:none}
+.log-toggle:hover{color:var(--text2)}
+.fetch-log{background:var(--bg3);border-bottom:1px solid var(--border2);padding:10px 18px;font-family:var(--mono);font-size:11px;max-height:110px;overflow-y:auto;display:none}
+.log-line{padding:1px 0;border-bottom:1px solid rgba(26,40,64,.4)}
+.log-line.ok{color:var(--up)}.log-line.err{color:var(--dn)}.log-line.info{color:var(--text2)}.log-line.warn{color:var(--warn)}
+
+/* ── TABS ── */
+.tabs-wrap{padding:12px 18px 0;border-bottom:1px solid var(--border);display:flex;gap:6px}
+.tab{padding:7px 18px;font-size:13px;border:1px solid var(--border);border-bottom:none;border-radius:7px 7px 0 0;cursor:pointer;background:var(--bg2);color:var(--text2);transition:all .2s;font-family:var(--sans)}
+.tab.active{background:var(--bg3);color:var(--accent);border-color:var(--border2)}
+.tc{font-size:10px;background:var(--border2);color:var(--text2);padding:1px 6px;border-radius:10px;margin-left:4px}
+.tab.active .tc{background:rgba(0,201,232,.2);color:var(--accent)}
+
+/* ── FILTERS ── */
+.filters{padding:10px 18px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.filter-label{font-size:10px;color:var(--text3);letter-spacing:.08em;text-transform:uppercase}
+.filter-btn{font-size:11px;padding:4px 10px;border:1px solid var(--border2);border-radius:5px;background:transparent;color:var(--text2);cursor:pointer;font-family:var(--sans);transition:all .15s}
+.filter-btn.active{background:rgba(0,201,232,.1);border-color:var(--accent);color:var(--accent)}
+.filter-btn:hover{border-color:var(--border3);color:var(--text)}
+
+/* ── METRICS ── */
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;padding:14px 18px;border-bottom:1px solid var(--border)}
+.mc{background:var(--bg3);border:1px solid var(--border);border-radius:var(--card-r);padding:11px 14px}
+.mc-label{font-size:10px;color:var(--text3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px}
+.mc-val{font-family:var(--mono);font-size:19px;font-weight:600}
+.mc-val.up{color:var(--up)}.mc-val.dn{color:var(--dn)}.mc-val.neu{color:var(--text2)}
+.mc-sub{font-size:10px;color:var(--text3);margin-top:2px;font-family:var(--mono)}
+
+/* ── TABLE ── */
+.tbl-wrap{padding:14px 18px;overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:560px}
+th{font-size:10px;color:var(--text3);letter-spacing:.09em;text-transform:uppercase;padding:7px 10px;text-align:right;border-bottom:1px solid var(--border);font-weight:400;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td{padding:10px 10px;border-bottom:1px solid rgba(26,40,64,.6);vertical-align:middle;white-space:nowrap}
+tr{transition:background .12s;cursor:pointer}
+tr:hover td{background:rgba(0,201,232,.04)}
+tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
+
+.sname{display:flex;flex-direction:column;gap:2px}
+.scode{font-family:var(--mono);font-size:13px;font-weight:600}
+.sinfo{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.scname{font-size:11px;color:var(--text2)}
+.tbadge{font-size:9px;padding:1px 5px;border-radius:3px;font-family:var(--mono)}
+.tbadge.etf{background:rgba(0,136,187,.15);color:#4fc3f7;border:1px solid rgba(0,136,187,.3)}
+.tbadge.stock{background:rgba(0,230,118,.07);color:#69f0ae;border:1px solid rgba(0,230,118,.18)}
+.tbadge.lev{background:rgba(255,171,0,.1);color:#ffd54f;border:1px solid rgba(255,171,0,.22)}
+.ibadge{font-size:9px;padding:1px 6px;border-radius:3px;background:var(--bg4);color:var(--text3);border:1px solid var(--border2)}
+
+.pv{font-family:var(--mono);font-size:14px;font-weight:600}
+.cv{font-family:var(--mono);font-size:11px}
+.pv.up,.cv.up{color:var(--up)}.pv.dn,.cv.dn{color:var(--dn)}.pv.neu,.cv.neu{color:var(--text2)}
+
+.sbadge{display:inline-flex;align-items:center;justify-content:center;width:34px;height:22px;border-radius:5px;font-family:var(--mono);font-size:11px;font-weight:600}
+.sbadge.buy{background:rgba(0,230,118,.14);color:var(--up);border:1px solid rgba(0,230,118,.28)}
+.sbadge.hold{background:rgba(255,171,0,.1);color:var(--warn);border:1px solid rgba(255,171,0,.22)}
+.sbadge.sell{background:rgba(255,79,79,.1);color:var(--dn);border:1px solid rgba(255,79,79,.22)}
+.sbadge.neutral{background:rgba(61,85,112,.18);color:var(--text2);border:1px solid var(--border2)}
+
+.spills{display:flex;gap:3px;flex-wrap:wrap;justify-content:flex-end}
+.sp{font-size:9px;padding:2px 5px;border-radius:3px}
+.sp.bull{background:rgba(0,230,118,.09);color:#69f0ae}
+.sp.bear{background:rgba(255,79,79,.09);color:#ff8a80}
+.sp.warn{background:rgba(255,171,0,.09);color:#ffd54f}
+.sp.neu{background:rgba(61,85,112,.12);color:var(--text2)}
+
+.spark{display:flex;align-items:flex-end;gap:1px;height:22px}
+.sb2{width:3px;border-radius:1px;min-height:2px}
+
+.skel{background:linear-gradient(90deg,var(--bg3) 25%,rgba(42,63,95,.3) 50%,var(--bg3) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:3px;display:inline-block}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* ── DETAIL PANEL ── */
+.det{margin:0 18px 18px;background:var(--bg3);border:1px solid var(--border2);border-radius:14px;padding:18px;animation:fadeIn .2s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+.det-hdr{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px;gap:10px;flex-wrap:wrap}
+.det-h2{font-size:19px;font-weight:700;font-family:var(--mono)}
+.det-sub{font-size:12px;color:var(--text2);margin-top:3px}
+.det-price{font-size:26px;font-weight:700;font-family:var(--mono)}
+.det-price.up{color:var(--up)}.det-price.dn{color:var(--dn)}.det-price.neu{color:var(--text2)}
+.det-chg{font-size:13px;font-family:var(--mono)}
+.det-chg.up{color:var(--up)}.det-chg.dn{color:var(--dn)}.det-chg.neu{color:var(--text2)}
+.det-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:14px}
+.dm{background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:9px 12px}
+.dm-l{font-size:10px;color:var(--text3);letter-spacing:.07em;text-transform:uppercase}
+.dm-v{font-family:var(--mono);font-size:15px;font-weight:600;margin-top:3px}
+.dm-v.up{color:var(--up)}.dm-v.dn{color:var(--dn)}.dm-v.warn{color:var(--warn)}.dm-v.neu{color:var(--text2)}
+
+/* ── AI BOX ── */
+.ai-box{background:linear-gradient(135deg,rgba(0,35,55,.7),rgba(0,18,35,.9));border:1px solid rgba(0,201,232,.18);border-radius:9px;padding:13px 15px;margin-top:10px}
+.ai-hdr{display:flex;align-items:center;gap:7px;margin-bottom:9px}
+.ai-ico{width:19px;height:19px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;color:#000;font-weight:700;flex-shrink:0}
+.ai-ttl{font-size:11px;font-weight:600;color:var(--accent);letter-spacing:.05em}
+.ai-src{font-size:10px;color:var(--text3);margin-left:4px}
+.ai-run{margin-left:auto;padding:3px 11px;background:rgba(0,201,232,.09);border:1px solid rgba(0,201,232,.28);color:var(--accent);border-radius:5px;cursor:pointer;font-size:10px;font-family:var(--sans);transition:all .2s}
+.ai-run:hover{background:rgba(0,201,232,.18)}
+.ai-out{font-size:12px;line-height:1.75;color:var(--text2)}
+.dots span{width:4px;height:4px;border-radius:50%;background:var(--accent);animation:dotP 1.2s infinite;display:inline-block;margin-right:2px}
+.dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}
+@keyframes dotP{0%,100%{opacity:.2}50%{opacity:1}}
+.ai-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.ai-tag{font-size:9px;padding:2px 7px;border-radius:3px;border:1px solid rgba(0,201,232,.18);color:var(--accent);background:rgba(0,201,232,.05)}
+
+/* ── NOTICE ── */
+.notice{margin:10px 18px;background:rgba(0,201,232,.04);border:1px solid rgba(0,201,232,.15);border-radius:8px;padding:10px 14px;font-size:11px;color:var(--text2);display:flex;align-items:flex-start;gap:8px}
+
+/* ── RESPONSIVE ── */
+@media(max-width:600px){
+  .hdr{padding:9px 12px}
+  .metrics{grid-template-columns:repeat(2,1fr);padding:10px 12px}
+  .tbl-wrap,.tabs-wrap,.filters,.api-bar,.log-toggle,.fetch-log{padding-left:12px;padding-right:12px}
+  .det,.notice{margin-left:12px;margin-right:12px}
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="logo">
+    <div class="live-dot"></div>
+    <div>
+      <div class="logo-text">台股分析看板 <span style="font-size:10px;color:var(--text3);font-weight:400">v3.1</span></div>
+      <div class="logo-sub">YAHOO FINANCE ｜ 15-MIN DELAY</div>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <div class="clock" id="clock">--:--:--</div>
+    <div class="mode-grp">
+      <button class="mode-btn active" onclick="setMode('before')">盤前</button>
+      <button class="mode-btn" onclick="setMode('after')">盤後</button>
+    </div>
+    <button class="icon-btn" id="ref-btn" onclick="fetchAllPrices()">↻ 抓取報價</button>
+  </div>
+</div>
+
+<!-- API STATUS -->
+<div class="api-bar">
+  <div class="api-item"><div class="api-dot off" id="dot-yahoo"></div><span class="api-label">Yahoo Finance</span></div>
+  <div class="api-item"><div class="api-dot off" id="dot-proxy"></div><span class="api-label">CORS Proxy</span></div>
+  <div class="api-item"><div class="api-dot off" id="dot-ai"></div><span class="api-label">Claude AI</span></div>
+  <div class="api-item">
+    <span style="font-size:10px;color:var(--text3)">來源：</span>
+    <span id="src-badge" class="src-mock">—</span>
+  </div>
+  <div class="api-msg" id="last-upd">尚未抓取，請點「↻ 抓取報價」</div>
+</div>
+
+<!-- LOG -->
+<div class="log-toggle" onclick="toggleLog()">
+  <span id="log-arrow">▶</span> API 抓取紀錄
+  <span id="log-count" style="font-size:10px;background:var(--bg4);padding:1px 7px;border-radius:10px;margin-left:4px">0</span>
+</div>
+<div class="fetch-log" id="fetch-log"></div>
+
+<!-- NOTICE -->
+<div class="notice">
+  📡 <div>
+    <b style="color:var(--accent)">Yahoo Finance（15分鐘延遲）</b>
+    — 點「↻ 抓取報價」自動取得所有個股最新報價，適合盤後技術分析與進階指標研究。
+    抓取失敗時自動切換備用 Proxy，最終回退至模擬資料。
+  </div>
+</div>
+
+<!-- TABS -->
+<div class="tabs-wrap">
+  <div class="tab active" onclick="switchTab('hold')">庫存股 <span class="tc" id="tc-hold">9</span></div>
+  <div class="tab" onclick="switchTab('watch')">觀察股 <span class="tc" id="tc-watch">8</span></div>
+</div>
+
+<!-- FILTERS -->
+<div class="filters" id="filters-row"></div>
+
+<!-- METRICS -->
+<div class="metrics">
+  <div class="mc">
+    <div class="mc-label">漲跌家數</div>
+    <div class="mc-val" id="m-updn">— / —</div>
+    <div class="mc-sub">上漲 / 下跌</div>
+  </div>
+  <div class="mc">
+    <div class="mc-label">最大漲幅</div>
+    <div class="mc-val up" id="m-best">—</div>
+    <div class="mc-sub" id="m-best-sub">—</div>
+  </div>
+  <div class="mc">
+    <div class="mc-label">最大跌幅</div>
+    <div class="mc-val dn" id="m-worst">—</div>
+    <div class="mc-sub" id="m-worst-sub">—</div>
+  </div>
+  <div class="mc">
+    <div class="mc-label">最強評分</div>
+    <div class="mc-val up" id="m-top">—</div>
+    <div class="mc-sub" id="m-top-sub">—</div>
+  </div>
+</div>
+
+<!-- TABLE -->
+<div class="tbl-wrap">
+  <table>
+    <thead id="main-thead"></thead>
+    <tbody id="main-tbody"></tbody>
+  </table>
+</div>
+
+<!-- DETAIL PANEL -->
+<div id="det-panel" style="display:none"></div>
+
+<script>
+// ── 庫存股（無成本/損益）────────────────────────────────
+let holdStocks = [
+  {code:'2002.TW', name:'南亞',    type:'stock', sector:'塑化'},
+  {code:'6243.TW', name:'久元',    type:'stock', sector:'半導體'},
+  {code:'2048.TW', name:'威剛',    type:'stock', sector:'記憶體'},
+  {code:'5289.TW', name:'宜鼎',    type:'stock', sector:'記憶體'},
+  {code:'2374.TW', name:'佳能',    type:'stock', sector:'影像'},
+  {code:'0050.TW', name:'0050',    type:'etf',   sector:'大盤ETF'},
+  {code:'0056.TW', name:'0056',    type:'etf',   sector:'高息ETF'},
+  {code:'00631L.TW',name:'00631L', type:'lev',   sector:'槓桿ETF'},
+  {code:'00981A.TW',name:'00981A', type:'etf',   sector:'債券ETF'},
+];
+
+// ── 觀察股 ───────────────────────────────────────────────
+let watchStocks = [
+  {code:'1568.TW', name:'可寧衛', type:'stock', sector:'環保'},
+  {code:'2412.TW', name:'中華電', type:'stock', sector:'電信'},
+  {code:'3022.TW', name:'威強電', type:'stock', sector:'工業電腦'},
+  {code:'1519.TW', name:'華城',   type:'stock', sector:'電力'},
+  {code:'2487.TW', name:'麗臺',   type:'stock', sector:'GPU/AI'},
+  {code:'3015.TW', name:'凡甲',   type:'stock', sector:'連接器'},
+  {code:'3606.TW', name:'豐達科', type:'stock', sector:'電源'},
+  {code:'3087.TW', name:'健策',   type:'stock', sector:'散熱'},
+];
+
+// ── 模擬資料（API 失敗時備用）────────────────────────────
+const MOCK = {
+  '2002.TW':  {price:68.2, chg:-0.3,  pct:-0.44,vol:12500,high:69.0,low:67.8},
+  '6243.TW':  {price:198.5,chg:3.5,   pct:1.79, vol:3200, high:200, low:195},
+  '2048.TW':  {price:62.5, chg:1.5,   pct:2.46, vol:8900, high:63,  low:61},
+  '5289.TW':  {price:218.0,chg:-7.0,  pct:-3.11,vol:2100, high:225, low:217},
+  '2374.TW':  {price:45.85,chg:0.85,  pct:1.89, vol:5600, high:46.2,low:44.9},
+  '0050.TW':  {price:152.5,chg:1.5,   pct:0.99, vol:15000,high:153, low:151},
+  '0056.TW':  {price:33.8, chg:0.3,   pct:0.90, vol:22000,high:34.0,low:33.5},
+  '00631L.TW':{price:61.2, chg:-0.8,  pct:-1.29,vol:8000, high:62.5,low:60.8},
+  '00981A.TW':{price:10.58,chg:0.08,  pct:0.76, vol:30000,high:10.6,low:10.5},
+  '1568.TW':  {price:285.0,chg:5.0,   pct:1.79, vol:980,  high:287, low:280},
+  '2412.TW':  {price:115.5,chg:0.0,   pct:0.00, vol:5200, high:116, low:115},
+  '3022.TW':  {price:88.5, chg:2.1,   pct:2.43, vol:1200, high:89,  low:86},
+  '1519.TW':  {price:425.0,chg:15.0,  pct:3.66, vol:3400, high:430, low:410},
+  '2487.TW':  {price:32.5, chg:-1.2,  pct:-3.56,vol:4500, high:34,  low:32},
+  '3015.TW':  {price:158.0,chg:3.5,   pct:2.26, vol:2800, high:159, low:154},
+  '3606.TW':  {price:112.5,chg:0.5,   pct:0.45, vol:1900, high:113, low:111},
+  '3087.TW':  {price:198.0,chg:8.0,   pct:4.21, vol:4200, high:200, low:190},
+};
+
+// ── 技術訊號（手動維護，可自行更新）────────────────────
+const SIGS = {
+  '2002.TW':   ['MA橫盤','KD死叉'],
+  '6243.TW':   ['突破季線','MACD翻多','量增'],
+  '2048.TW':   ['週線拉升','庫存去化'],
+  '5289.TW':   ['跌破月線','量縮'],
+  '2374.TW':   ['MA多頭','短線超買'],
+  '0050.TW':   ['指數連動','月線支撐'],
+  '0056.TW':   ['除息行情','配息月'],
+  '00631L.TW': ['槓桿放大','波動高'],
+  '00981A.TW': ['降息受惠','防禦型'],
+  '1568.TW':   ['廢棄物需求','政策利多'],
+  '2412.TW':   ['電信穩定','高殖利率'],
+  '3022.TW':   ['AI伺服器','工業電腦'],
+  '1519.TW':   ['電力擴建','強勢股'],
+  '2487.TW':   ['AI繪圖卡','高波動'],
+  '3015.TW':   ['電動車','連接器需求'],
+  '3606.TW':   ['伺服器電源','需求增'],
+  '3087.TW':   ['AI散熱','法說利多'],
+};
+
+// ── 近5日走勢（API成功後會更新為真實資料）──────────────
+const SPARK = {
+  '2002.TW':   [70,69.5,68.8,68.2,68.2],
+  '6243.TW':   [188,191,193,195,198.5],
+  '2048.TW':   [59,60,61,61.5,62.5],
+  '5289.TW':   [230,228,225,220,218],
+  '2374.TW':   [43,43.5,44,45,45.85],
+  '0050.TW':   [149,150,151,151.5,152.5],
+  '0056.TW':   [33,33.2,33.4,33.6,33.8],
+  '00631L.TW': [63,62.5,61.8,61.5,61.2],
+  '00981A.TW': [10.4,10.45,10.5,10.55,10.58],
+  '1568.TW':   [268,272,278,282,285],
+  '2412.TW':   [115,115,115.5,115.5,115.5],
+  '3022.TW':   [84,85,86,87,88.5],
+  '1519.TW':   [395,400,410,418,425],
+  '2487.TW':   [36,35,34,33.5,32.5],
+  '3015.TW':   [150,152,154,156,158],
+  '3606.TW':   [110,111,111.5,112,112.5],
+  '3087.TW':   [180,183,188,193,198],
+};
+
+// ── STATE ────────────────────────────────────────────────
+let priceData = {};
+let priceSource = {};  // 'live' | 'mock'
+let currentTab = 'hold', selStock = null, activeFilter = 'all', loading = false;
+
+// ── CORS PROXIES（依序嘗試）──────────────────────────────
+const PROXIES = [
+  c => `https://corsproxy.io/?${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${c}?interval=1d&range=5d`)}`,
+  c => `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${c}?interval=1d&range=5d`)}`,
+  c => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${c}?interval=1d&range=5d`)}`,
+];
+
+// ── FETCH 單一個股 ───────────────────────────────────────
+async function fetchOne(code, idx = 0) {
+  if (idx >= PROXIES.length) return null;
+  try {
+    const r = await fetch(PROXIES[idx](code), {signal: AbortSignal.timeout(8000)});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    const meta = j?.chart?.result?.[0]?.meta;
+    if (!meta) throw new Error('no meta');
+    const price = meta.regularMarketPrice ?? meta.previousClose;
+    const prev  = meta.chartPreviousClose ?? meta.previousClose ?? price;
+    const chg   = +(price - prev).toFixed(2);
+    const pct   = prev ? +(chg / prev * 100).toFixed(2) : 0;
+    // 更新近5日走勢為真實資料
+    const closes = j.chart.result[0].indicators?.quote?.[0]?.close?.filter(Boolean) ?? [];
+    if (closes.length >= 2) SPARK[code] = closes.slice(-5).map(v => +v.toFixed(2));
+    return {
+      price: +price.toFixed(2), chg, pct,
+      vol:  Math.round((meta.regularMarketVolume ?? 0) / 1000),
+      high: +(meta.regularMarketDayHigh ?? price).toFixed(2),
+      low:  +(meta.regularMarketDayLow  ?? price).toFixed(2),
+    };
+  } catch(e) {
+    if (idx + 1 < PROXIES.length) {
+      addLog('warn', `${code} proxy${idx+1} 失敗 (${e.message})，切換備用…`);
+      return fetchOne(code, idx + 1);
+    }
+    return null;
+  }
+}
+
+// ── FETCH 全部 ───────────────────────────────────────────
+async function fetchAllPrices() {
+  if (loading) return;
+  loading = true;
+  const btn = document.getElementById('ref-btn');
+  btn.classList.add('loading-btn');
+  btn.innerHTML = '<span class="spin">↻</span> 抓取中…';
+  setDot('dot-yahoo','off'); setDot('dot-proxy','off');
+  clearLog();
+  addLog('info', `開始抓取 Yahoo Finance，共 ${holdStocks.length + watchStocks.length} 檔…`);
+
+  const all = [...holdStocks, ...watchStocks];
+  let ok = 0, fail = 0;
+
+  for (const stock of all) {
+    addLog('info', `→ ${stock.code} ${stock.name}`);
+    const data = await fetchOne(stock.code);
+    if (data) {
+      priceData[stock.code]  = data;
+      priceSource[stock.code] = 'live';
+      ok++;
+      addLog('ok', `✓ ${stock.code}  ${data.price}  ${data.chg >= 0 ? '+' : ''}${data.chg} (${data.pct >= 0 ? '+' : ''}${data.pct}%)`);
+    } else {
+      priceData[stock.code]  = {...MOCK[stock.code]};
+      priceSource[stock.code] = 'mock';
+      fail++;
+      addLog('err', `✗ ${stock.code} 失敗，使用模擬資料`);
+    }
+    renderTable();
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  const sb = document.getElementById('src-badge');
+  if (ok > 0) {
+    setDot('dot-yahoo','ok'); setDot('dot-proxy','ok');
+    sb.textContent = ok === all.length ? 'LIVE' : `${ok}L/${fail}M`;
+    sb.className   = ok === all.length ? 'src-live' : 'src-mock';
+  } else {
+    setDot('dot-yahoo','err'); setDot('dot-proxy','err');
+    sb.textContent = 'MOCK'; sb.className = 'src-mock';
+  }
+
+  const t = new Date().toLocaleTimeString('zh-TW');
+  document.getElementById('last-upd').textContent = `${t} 更新 — 成功 ${ok} 失敗 ${fail}`;
+  addLog('info', `完成。成功 ${ok}，失敗 ${fail}`);
+  btn.classList.remove('loading-btn');
+  btn.innerHTML = '↻ 抓取報價';
+  loading = false;
+  renderTable();
+}
+
+// ── LOG ──────────────────────────────────────────────────
+function addLog(type, msg) {
+  const el  = document.getElementById('fetch-log');
+  const div = document.createElement('div');
+  div.className = `log-line ${type}`;
+  div.textContent = `[${new Date().toLocaleTimeString('zh-TW')}] ${msg}`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+  document.getElementById('log-count').textContent = el.children.length;
+}
+function clearLog() {
+  document.getElementById('fetch-log').innerHTML = '';
+  document.getElementById('log-count').textContent = '0';
+}
+function toggleLog() {
+  const el = document.getElementById('fetch-log');
+  const open = el.style.display === 'block';
+  el.style.display = open ? 'none' : 'block';
+  document.getElementById('log-arrow').textContent = open ? '▶' : '▼';
+}
+function setDot(id, state) {
+  document.getElementById(id).className = `api-dot ${state}`;
+}
+
+// ── HELPERS ──────────────────────────────────────────────
+const fmt  = (n, d=0) => n == null ? '—' : n.toLocaleString('zh-TW', {minimumFractionDigits:d, maximumFractionDigits:d});
+const fmtP = n => (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+const cls  = n => n > 0 ? 'up' : n < 0 ? 'dn' : 'neu';
+
+function calcScore(stock, pd) {
+  if (!pd) return {score:50, label:'N/A', cls:'neutral'};
+  let s = 50;
+  if      (pd.pct >  2)  s += 18;
+  else if (pd.pct >  0.5) s +=  8;
+  else if (pd.pct < -2)  s -= 18;
+  else if (pd.pct < -0.5) s -=  8;
+  const sig = SIGS[stock.code] || [];
+  if (sig.some(x => ['突破','翻多','利多','拉升','受惠','增'].some(k => x.includes(k)))) s += 10;
+  if (sig.some(x => ['跌破','死叉','量縮'].some(k => x.includes(k)))) s -= 10;
+  s = Math.max(10, Math.min(95, s));
+  if (s >= 70) return {score:s, label:'買', cls:'buy'};
+  if (s >= 50) return {score:s, label:'持', cls:'hold'};
+  if (s >= 30) return {score:s, label:'觀', cls:'neutral'};
+  return {score:s, label:'賣', cls:'sell'};
+}
+
+function sparkHTML(code) {
+  const d  = SPARK[code] || [50,50,50,50,50];
+  const mn = Math.min(...d), mx = Math.max(...d), r = mx - mn || 1;
+  const c  = d[d.length-1] >= d[0] ? 'var(--up)' : 'var(--dn)';
+  return d.map(v =>
+    `<div class="sb2" style="height:${Math.round(3+(v-mn)/r*17)}px;background:${c};opacity:${(.35+(v-mn)/r*.6).toFixed(2)}"></div>`
+  ).join('');
+}
+
+function pillsHTML(code) {
+  const bull = ['突破','翻多','利多','拉升','受惠','連動','多頭','增'];
+  const bear = ['跌破','死叉','量縮'];
+  const warn = ['超買','波動','槓桿'];
+  return (SIGS[code] || []).slice(0, 3).map(s => {
+    const c = bull.some(k => s.includes(k)) ? 'bull'
+            : bear.some(k => s.includes(k)) ? 'bear'
+            : warn.some(k => s.includes(k)) ? 'warn' : 'neu';
+    return `<span class="sp ${c}">${s}</span>`;
+  }).join('');
+}
+
+function srcTag(code) {
+  return priceSource[code] === 'live'
+    ? '<span class="src-live">LIVE</span>'
+    : priceSource[code] === 'mock'
+    ? '<span class="src-mock">MOCK</span>'
+    : '';
+}
+
+// ── FILTERS ──────────────────────────────────────────────
+function buildFilters() {
+  const stocks  = currentTab === 'hold' ? holdStocks : watchStocks;
+  const sectors = [...new Set(stocks.map(s => s.sector))];
+  document.getElementById('filters-row').innerHTML =
+    `<span class="filter-label">產業</span>
+     <button class="filter-btn ${activeFilter==='all'?'active':''}" onclick="setFilter('all')">全部</button>` +
+    sectors.map(s =>
+      `<button class="filter-btn ${activeFilter===s?'active':''}" onclick="setFilter('${s}')">${s}</button>`
+    ).join('');
+}
+function setFilter(f) { activeFilter = f; buildFilters(); renderTable(); }
+
+// ── RENDER TABLE ─────────────────────────────────────────
+function renderTable() {
+  const stocks = (currentTab === 'hold' ? holdStocks : watchStocks)
+    .filter(s => activeFilter === 'all' || s.sector === activeFilter);
+
+  // thead — 庫存股與觀察股欄位完全相同（都不顯示損益）
+  document.getElementById('main-thead').innerHTML = `<tr>
+    <th>個股</th>
+    <th>現價</th>
+    <th>漲跌</th>
+    <th>量（張）</th>
+    <th>技術訊號</th>
+    <th>近5日</th>
+    <th>評分</th>
+    ${currentTab === 'watch' ? '<th>動作</th>' : ''}
+  </tr>`;
+
+  const tbody = document.getElementById('main-tbody');
+  tbody.innerHTML = '';
+
+  let upC=0, dnC=0, topSc=0, topNm='', bestPct=-Infinity, worstPct=Infinity, bestNm='', worstNm='';
+
+  stocks.forEach(stock => {
+    const pd   = priceData[stock.code];
+    const price= pd?.price ?? null;
+    const chg  = pd?.chg   ?? null;
+    const pct  = pd?.pct   ?? null;
+    const vol  = pd?.vol   ?? null;
+
+    if (pd && pct > 0) upC++;
+    if (pd && pct < 0) dnC++;
+    const sc = calcScore(stock, pd);
+    if (sc.score > topSc) { topSc = sc.score; topNm = stock.name; }
+    if (pd && pct > bestPct)  { bestPct  = pct;  bestNm  = stock.name; }
+    if (pd && pct < worstPct) { worstPct = pct;  worstNm = stock.name; }
+
+    const isSel    = selStock === stock.code;
+    const tbadge   = stock.type === 'etf' ? 'ETF' : stock.type === 'lev' ? '槓桿' : '股票';
+
+    const priceCell = pd
+      ? `<div style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+           <span class="pv ${cls(pct)}">${fmt(price, 2)}</span>${srcTag(stock.code)}
+         </div>`
+      : `<span class="skel" style="width:50px;height:14px"></span>`;
+
+    const chgCell = pd
+      ? `<div class="cv ${cls(pct)}">${chg >= 0 ? '+' : ''}${fmt(chg, 2)}<br>
+           <span style="font-size:9px">${fmtP(pct)}</span></div>`
+      : `<span class="skel" style="width:40px;height:12px"></span>`;
+
+    const volCell = pd
+      ? `<span style="font-family:var(--mono);font-size:12px;color:var(--text2)">${fmt(vol, 0)}</span>`
+      : `<span class="skel" style="width:36px;height:12px"></span>`;
+
+    const tr = document.createElement('tr');
+    if (isSel) tr.className = 'sel';
+
+    tr.innerHTML = `
+      <td onclick="selStk('${stock.code}')">
+        <div class="sname">
+          <div class="scode">${stock.code.replace('.TW','')}</div>
+          <div class="sinfo">
+            <span class="scname">${stock.name}</span>
+            <span class="tbadge ${stock.type}">${tbadge}</span>
+            <span class="ibadge">${stock.sector}</span>
+          </div>
+        </div>
+      </td>
+      <td style="text-align:right" onclick="selStk('${stock.code}')">${priceCell}</td>
+      <td style="text-align:right" onclick="selStk('${stock.code}')">${chgCell}</td>
+      <td style="text-align:right" onclick="selStk('${stock.code}')">${volCell}</td>
+      <td onclick="selStk('${stock.code}')"><div class="spills">${pillsHTML(stock.code)}</div></td>
+      <td onclick="selStk('${stock.code}')"><div class="spark">${sparkHTML(stock.code)}</div></td>
+      <td style="text-align:center" onclick="selStk('${stock.code}')">
+        <span class="sbadge ${sc.cls}" title="評分 ${sc.score}">${sc.label}</span>
+      </td>
+      ${currentTab === 'watch' ? `
+      <td style="text-align:center">
+        <button onclick="moveToHold('${stock.code}');event.stopPropagation()"
+          style="font-size:10px;padding:3px 9px;background:rgba(0,201,232,.09);border:1px solid rgba(0,201,232,.25);color:var(--accent);border-radius:4px;cursor:pointer;font-family:var(--sans)">
+          + 加入庫存
+        </button>
+      </td>` : ''}
+    `;
+    tbody.appendChild(tr);
+  });
+
+  // 更新 metrics
+  const ue = document.getElementById('m-updn');
+  ue.textContent = `${upC} / ${dnC}`;
+  ue.className   = 'mc-val ' + (upC >= dnC ? 'up' : 'dn');
+
+  const be = document.getElementById('m-best');
+  be.textContent = bestPct > -Infinity ? fmtP(bestPct) : '—';
+  be.className   = 'mc-val up';
+  document.getElementById('m-best-sub').textContent = bestNm || '—';
+
+  const we = document.getElementById('m-worst');
+  we.textContent = worstPct < Infinity ? fmtP(worstPct) : '—';
+  we.className   = 'mc-val dn';
+  document.getElementById('m-worst-sub').textContent = worstNm || '—';
+
+  document.getElementById('m-top').textContent     = topSc > 0 ? topSc : '—';
+  document.getElementById('m-top-sub').textContent = topNm || '—';
+}
+
+// ── DETAIL PANEL ─────────────────────────────────────────
+function selStk(code) {
+  if (selStock === code) {
+    selStock = null;
+    document.getElementById('det-panel').style.display = 'none';
+    renderTable(); return;
+  }
+  selStock = code; renderTable(); showDetail(code);
+}
+
+function showDetail(code) {
+  const panel = document.getElementById('det-panel');
+  panel.style.display = 'block';
+  const pd    = priceData[code];
+  const stock = [...holdStocks, ...watchStocks].find(s => s.code === code);
+  const sc    = calcScore(stock, pd);
+  const src   = priceSource[code];
+
+  const mets = [
+    {l:'今日最高', v: pd ? fmt(pd.high, 2) : '—', c:'up'},
+    {l:'今日最低', v: pd ? fmt(pd.low,  2) : '—', c:'dn'},
+    {l:'成交量',   v: pd ? fmt(pd.vol,  0)+'張' : '—', c:'neu'},
+    {l:'漲跌幅',   v: pd ? fmtP(pd.pct)        : '—', c: cls(pd?.pct)},
+    {l:'綜合評分', v: sc.score, c: sc.score>=70?'up':sc.score>=50?'warn':'dn'},
+    {l:'產業',     v: stock?.sector || '—', c:'neu'},
+  ];
+
+  panel.innerHTML = `<div class="det">
+    <div class="det-hdr">
+      <div>
+        <div class="det-h2">${code.replace('.TW','')} ${stock?.name || ''}</div>
+        <div class="det-sub">
+          ${stock?.sector} ｜ ${stock?.type==='etf'?'ETF':stock?.type==='lev'?'槓桿ETF':'股票'}
+          ｜ 資料：${src==='live'
+            ? '<span class="src-live">Yahoo Finance LIVE</span>'
+            : '<span class="src-mock">模擬資料</span>'}
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div class="det-price ${cls(pd?.pct)}">${pd ? fmt(pd.price, 2) : '—'}</div>
+        <div class="det-chg ${cls(pd?.pct)}">
+          ${pd ? (pd.chg>=0?'+':'')+fmt(pd.chg,2)+' ('+fmtP(pd.pct)+')' : '—'}
+        </div>
+      </div>
+    </div>
+    <div class="det-grid">
+      ${mets.map(m => `
+        <div class="dm">
+          <div class="dm-l">${m.l}</div>
+          <div class="dm-v ${m.c}">${m.v}</div>
+        </div>`).join('')}
+    </div>
+    <div class="ai-box">
+      <div class="ai-hdr">
+        <div class="ai-ico">AI</div>
+        <div class="ai-ttl">Claude 智能分析</div>
+        <span class="ai-src">${src==='live'?'（即時報價）':'（模擬資料）'}</span>
+        <button class="ai-run" onclick="runAI('${code}','${stock?.name||''}')">▶ 執行分析</button>
+      </div>
+      <div id="ai-${code}" class="ai-out" style="color:var(--text3);font-size:11px">
+        點擊「執行分析」，Claude 將根據 Yahoo Finance 報價、技術訊號與產業背景，生成個股盤前／盤後分析摘要。
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── AI 分析 ──────────────────────────────────────────────
+async function runAI(code, name) {
+  const el    = document.getElementById(`ai-${code}`);
+  if (!el) return;
+  const stock = [...holdStocks, ...watchStocks].find(s => s.code === code);
+  const pd    = priceData[code];
+  const sc    = calcScore(stock, pd);
+  const src   = priceSource[code] === 'live' ? 'Yahoo Finance（15分鐘延遲）' : '模擬資料';
+
+  el.innerHTML = `<div style="display:flex;align-items:center;gap:7px;color:var(--text3);font-size:11px">
+    <div class="dots"><span></span><span></span><span></span></div> Claude 分析中…</div>`;
+  setDot('dot-ai', 'ok');
+
+  const prompt = `你是台股專業分析師。請用繁體中文250字以內，針對以下個股給出盤前／盤後分析摘要，適合一般投資人理解。
+
+個股：${code.replace('.TW','')} ${name}
+產業：${stock?.sector || '不明'}
+資料來源：${src}
+現價：${pd?.price ?? '不明'} 元
+漲跌：${pd ? (pd.chg>=0?'+':'')+pd.chg+'元 ('+pd.pct.toFixed(2)+'%)' : '不明'}
+今日區間：${pd ? pd.low+'～'+pd.high : '不明'}
+成交量：${pd ? fmt(pd.vol,0)+'張' : '不明'}
+技術訊號：${(SIGS[code]||[]).join('、') || '無'}
+綜合評分：${sc.score}/100（${sc.label}）
+
+請包含：①今日技術面狀況 ②短線操作建議 ③主要風險點`;
+
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{role:'user', content: prompt}]
+      })
+    });
+    const d   = await r.json();
+    const txt = d.content?.[0]?.text || '分析失敗，請重試。';
+    el.innerHTML = `<div style="line-height:1.8">${txt.replace(/\n/g,'<br>')}</div>
+      <div class="ai-tags" style="margin-top:8px">
+        ${(SIGS[code]||[]).map(s => `<span class="ai-tag">${s}</span>`).join('')}
+        <span class="ai-tag">評分 ${sc.score}</span>
+        <span class="ai-tag">${src}</span>
+      </div>`;
+  } catch(e) {
+    el.innerHTML = `<span style="color:var(--dn);font-size:11px">
+      ⚠ Claude API 需要在本機環境才能呼叫（需設定 API Key）。<br>
+      <span style="color:var(--text3)">
+        部署到本機後，在 &lt;script&gt; 區段加入你的 Anthropic API Key 即可啟用 AI 分析。<br>
+        詳見：<a href="https://console.anthropic.com" target="_blank" style="color:var(--accent)">console.anthropic.com</a>
+      </span></span>`;
+    setDot('dot-ai', 'warn');
+  }
+}
+
+// ── 觀察股移入庫存股 ─────────────────────────────────────
+function moveToHold(code) {
+  const s = watchStocks.find(x => x.code === code);
+  if (!s || holdStocks.find(x => x.code === code)) return;
+  holdStocks.push({...s});
+  watchStocks = watchStocks.filter(x => x.code !== code);
+  document.getElementById('tc-hold').textContent  = holdStocks.length;
+  document.getElementById('tc-watch').textContent = watchStocks.length;
+  switchTab('hold');
+}
+
+// ── TAB / MODE ────────────────────────────────────────────
+function switchTab(t) {
+  currentTab   = t; selStock = null; activeFilter = 'all';
+  document.getElementById('det-panel').style.display = 'none';
+  document.querySelectorAll('.tabs-wrap .tab').forEach((x,i) =>
+    x.classList.toggle('active', (i===0&&t==='hold')||(i===1&&t==='watch')));
+  buildFilters(); renderTable();
+}
+function setMode(m) {
+  document.querySelectorAll('.mode-btn').forEach((b,i) =>
+    b.classList.toggle('active', (i===0&&m==='before')||(i===1&&m==='after')));
+}
+
+// ── 時鐘 ──────────────────────────────────────────────────
+setInterval(() => {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}, 1000);
+
+// ── INIT ──────────────────────────────────────────────────
+buildFilters();
+renderTable();
+</script>
+</body>
+</html>
