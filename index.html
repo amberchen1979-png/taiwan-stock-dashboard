@@ -258,7 +258,7 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
 </div>
 
 <!-- MODE BANNER -->
-<div class="mode-banner before" id="mode-banner">
+<div class="mode-banner before" id="mode-banner" style="display:none">
   <b id="mode-title">📋 盤前分析重點</b>
   <div class="mb-items" id="mode-items">
     <span class="mb-tag">觀察昨收與開盤缺口</span>
@@ -430,56 +430,56 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
 <script>
 // ── 庫存股（無成本/損益）────────────────────────────────
 let holdStocks = [
-  {code:'1303.TW', name:'南亞',    type:'stock', sector:'塑化'},
-  {code:'6261.TW', name:'久元',    type:'stock', sector:'半導體'},
-  {code:'3260.TW', name:'威剛',    type:'stock', sector:'記憶體'},
-  {code:'5289.TW', name:'宜鼎',    type:'stock', sector:'記憶體'},
-  {code:'2374.TW', name:'佳能',    type:'stock', sector:'影像'},
-  {code:'0050.TW', name:'0050',    type:'etf',   sector:'大盤ETF'},
-  {code:'0056.TW', name:'0056',    type:'etf',   sector:'高息ETF'},
-  {code:'00631L.TW',name:'00631L', type:'lev',   sector:'槓桿ETF'},
-  {code:'00981A.TW',name:'00981A', type:'etf',   sector:'債券ETF'},
+  {code:'1303.TW',  name:'南亞',    type:'stock', sector:'塑化',   market:'tse'},
+  {code:'6261.TWO', name:'久元',    type:'stock', sector:'半導體', market:'otc'},
+  {code:'3260.TWO', name:'威剛',    type:'stock', sector:'記憶體', market:'otc'},
+  {code:'5289.TWO', name:'宜鼎',    type:'stock', sector:'記憶體', market:'otc'},
+  {code:'2374.TW',  name:'佳能',    type:'stock', sector:'影像',   market:'tse'},
+  {code:'0050.TW',  name:'0050',    type:'etf',   sector:'大盤ETF',market:'tse'},
+  {code:'0056.TW',  name:'0056',    type:'etf',   sector:'高息ETF',market:'tse'},
+  {code:'00631L.TW',name:'00631L',  type:'lev',   sector:'槓桿ETF',market:'tse'},
+  {code:'00981A.TW',name:'00981A',  type:'etf',   sector:'債券ETF',market:'tse'},
 ];
 
 // ── 觀察股 ───────────────────────────────────────────────
 let watchStocks = [
-  {code:'8422.TW', name:'可寧衛', type:'stock', sector:'環保'},
-  {code:'2412.TW', name:'中華電', type:'stock', sector:'電信'},
-  {code:'3022.TW', name:'威強電', type:'stock', sector:'工業電腦'},
-  {code:'1519.TW', name:'華城',   type:'stock', sector:'電力'},
-  {code:'2465.TW', name:'麗臺',   type:'stock', sector:'GPU/AI'},
-  {code:'3526.TW', name:'凡甲',   type:'stock', sector:'連接器'},
-  {code:'3004.TW', name:'豐達科', type:'stock', sector:'電源'},
-  {code:'3653.TW', name:'健策',   type:'stock', sector:'散熱'},
+  {code:'8422.TW',  name:'可寧衛', type:'stock', sector:'環保',    market:'tse'},
+  {code:'2412.TW',  name:'中華電', type:'stock', sector:'電信',    market:'tse'},
+  {code:'3022.TW',  name:'威強電', type:'stock', sector:'工業電腦',market:'tse'},
+  {code:'1519.TW',  name:'華城',   type:'stock', sector:'電力',    market:'tse'},
+  {code:'2465.TWO', name:'麗臺',   type:'stock', sector:'GPU/AI',  market:'otc'},
+  {code:'3526.TWO', name:'凡甲',   type:'stock', sector:'連接器',  market:'otc'},
+  {code:'3004.TW',  name:'豐達科', type:'stock', sector:'電源',    market:'tse'},
+  {code:'3653.TWO', name:'健策',   type:'stock', sector:'散熱',    market:'otc'},
 ];
 
 // ── 模擬資料（API 失敗時備用）────────────────────────────
 const MOCK = {
-  '1303.TW':  {price:62.5, chg:-0.4,  pct:-0.63,vol:18500,high:63.2,low:62.1},
-  '6261.TW':  {price:142.0,chg:2.0,   pct:1.43, vol:2100, high:144, low:140},
-  '3260.TW':  {price:38.5, chg:0.5,   pct:1.32, vol:5200, high:39,  low:38},
-  '5289.TW':  {price:218.0,chg:-7.0,  pct:-3.11,vol:2100, high:225, low:217},
-  '2374.TW':  {price:45.85,chg:0.85,  pct:1.89, vol:5600, high:46.2,low:44.9},
-  '0050.TW':  {price:198.5,chg:1.5,   pct:0.76, vol:25000,high:199, low:197},
-  '0056.TW':  {price:36.8, chg:0.2,   pct:0.55, vol:32000,high:37.0,low:36.5},
-  '00631L.TW':{price:88.2, chg:-1.2,  pct:-1.34,vol:9000, high:90,  low:87.8},
-  '00981A.TW':{price:10.58,chg:0.08,  pct:0.76, vol:30000,high:10.6,low:10.5},
-  '8422.TW':  {price:285.0,chg:5.0,   pct:1.79, vol:980,  high:287, low:280},
-  '2412.TW':  {price:135.5,chg:0.0,   pct:0.00, vol:5200, high:136, low:135},
-  '3022.TW':  {price:88.5, chg:2.1,   pct:2.43, vol:1200, high:89,  low:86},
-  '1519.TW':  {price:894.0,chg:14.0,  pct:1.59, vol:3400, high:900, low:885},
-  '2465.TW':  {price:32.5, chg:-1.2,  pct:-3.56,vol:4500, high:34,  low:32},
-  '3526.TW':  {price:158.0,chg:3.5,   pct:2.26, vol:2800, high:159, low:154},
-  '3004.TW':  {price:112.5,chg:0.5,   pct:0.45, vol:1900, high:113, low:111},
-  '3653.TW':  {price:198.0,chg:8.0,   pct:4.21, vol:4200, high:200, low:190},
+  '1303.TW':   {price:62.5, chg:-0.4,  pct:-0.63,vol:18500,high:63.2,low:62.1},
+  '6261.TWO':  {price:142.0,chg:2.0,   pct:1.43, vol:2100, high:144, low:140},
+  '3260.TWO':  {price:38.5, chg:0.5,   pct:1.32, vol:5200, high:39,  low:38},
+  '5289.TWO':  {price:218.0,chg:-7.0,  pct:-3.11,vol:2100, high:225, low:217},
+  '2374.TW':   {price:45.85,chg:0.85,  pct:1.89, vol:5600, high:46.2,low:44.9},
+  '0050.TW':   {price:198.5,chg:1.5,   pct:0.76, vol:25000,high:199, low:197},
+  '0056.TW':   {price:36.8, chg:0.2,   pct:0.55, vol:32000,high:37.0,low:36.5},
+  '00631L.TW': {price:88.2, chg:-1.2,  pct:-1.34,vol:9000, high:90,  low:87.8},
+  '00981A.TW': {price:10.58,chg:0.08,  pct:0.76, vol:30000,high:10.6,low:10.5},
+  '8422.TW':   {price:285.0,chg:5.0,   pct:1.79, vol:980,  high:287, low:280},
+  '2412.TW':   {price:135.5,chg:0.0,   pct:0.00, vol:5200, high:136, low:135},
+  '3022.TW':   {price:88.5, chg:2.1,   pct:2.43, vol:1200, high:89,  low:86},
+  '1519.TW':   {price:894.0,chg:14.0,  pct:1.59, vol:3400, high:900, low:885},
+  '2465.TWO':  {price:32.5, chg:-1.2,  pct:-3.56,vol:4500, high:34,  low:32},
+  '3526.TWO':  {price:158.0,chg:3.5,   pct:2.26, vol:2800, high:159, low:154},
+  '3004.TW':   {price:112.5,chg:0.5,   pct:0.45, vol:1900, high:113, low:111},
+  '3653.TWO':  {price:198.0,chg:8.0,   pct:4.21, vol:4200, high:200, low:190},
 };
 
 // ── 技術訊號：每檔固定四個欄位 [MACD狀態, KD狀態, RSI值, 布林通道] ──
 const SIGS = {
   '1303.TW':   ['MACD空頭','KD走弱','RSI 38','布林下緣'],
-  '6261.TW':   ['MACD翻多','KD金叉','RSI 62','布林中軌上'],
-  '3260.TW':   ['MACD多頭','KD向上','RSI 55','布林中軌'],
-  '5289.TW':   ['MACD死叉','KD超賣','RSI 32','布林下穿'],
+  '6261.TWO':   ['MACD翻多','KD金叉','RSI 62','布林中軌上'],
+  '3260.TWO':   ['MACD多頭','KD向上','RSI 55','布林中軌'],
+  '5289.TWO':   ['MACD死叉','KD超賣','RSI 32','布林下穿'],
   '2374.TW':   ['MACD多頭','KD高檔','RSI 72','布林上緣'],
   '0050.TW':   ['MACD中性','KD中性','RSI 52','布林中軌'],
   '0056.TW':   ['MACD中性','KD向上','RSI 48','布林中軌下'],
@@ -489,18 +489,18 @@ const SIGS = {
   '2412.TW':   ['MACD中性','KD中性','RSI 45','布林中軌'],
   '3022.TW':   ['MACD翻多','KD金叉','RSI 67','突破布林上軌'],
   '1519.TW':   ['MACD強多','KD高檔','RSI 75','布林上緣'],
-  '2465.TW':   ['MACD死叉','KD超賣','RSI 28','布林下穿'],
-  '3526.TW':   ['MACD多頭','KD向上','RSI 58','布林中軌上'],
+  '2465.TWO':   ['MACD死叉','KD超賣','RSI 28','布林下穿'],
+  '3526.TWO':   ['MACD多頭','KD向上','RSI 58','布林中軌上'],
   '3004.TW':   ['MACD中性','KD中性','RSI 52','布林收斂'],
-  '3653.TW':   ['MACD強多','KD高檔','RSI 70','布林上緣'],
+  '3653.TWO':   ['MACD強多','KD高檔','RSI 70','布林上緣'],
 };
 
 // ── 近5日走勢（API成功後會更新為真實資料）──────────────
 const SPARK = {
   '1303.TW':   [64,63.5,63,62.8,62.5],
-  '6261.TW':   [136,138,140,141,142],
-  '3260.TW':   [37,37.5,38,38.2,38.5],
-  '5289.TW':   [230,228,225,220,218],
+  '6261.TWO':   [136,138,140,141,142],
+  '3260.TWO':   [37,37.5,38,38.2,38.5],
+  '5289.TWO':   [230,228,225,220,218],
   '2374.TW':   [43,43.5,44,45,45.85],
   '0050.TW':   [195,196,197,198,198.5],
   '0056.TW':   [36,36.2,36.4,36.6,36.8],
@@ -510,10 +510,10 @@ const SPARK = {
   '2412.TW':   [135,135,135.5,135.5,135.5],
   '3022.TW':   [84,85,86,87,88.5],
   '1519.TW':   [860,870,880,888,894],
-  '2465.TW':   [36,35,34,33.5,32.5],
-  '3526.TW':   [150,152,154,156,158],
+  '2465.TWO':   [36,35,34,33.5,32.5],
+  '3526.TWO':   [150,152,154,156,158],
   '3004.TW':   [110,111,111.5,112,112.5],
-  '3653.TW':   [180,183,188,193,198],
+  '3653.TWO':   [180,183,188,193,198],
 };
 
 // ── 財務資料（⚠ 以下為模擬示範數據，非真實財報）───────────
@@ -521,9 +521,9 @@ const SPARK = {
 // eps_ly: 去年全年EPS, eps_ytd: 今年累積EPS, gm: 毛利率%, rev_yoy: 營收YOY%
 const FINS = {
   '1303.TW':   {eps_ly:2.1,  eps_ytd:0.8,  gm:12.5, rev_yoy:-3.2},
-  '6261.TW':   {eps_ly:8.4,  eps_ytd:3.2,  gm:38.2, rev_yoy:+12.4},
-  '3260.TW':   {eps_ly:3.2,  eps_ytd:1.8,  gm:18.6, rev_yoy:+22.1},
-  '5289.TW':   {eps_ly:12.5, eps_ytd:3.1,  gm:42.3, rev_yoy:-8.5},
+  '6261.TWO':   {eps_ly:8.4,  eps_ytd:3.2,  gm:38.2, rev_yoy:+12.4},
+  '3260.TWO':   {eps_ly:3.2,  eps_ytd:1.8,  gm:18.6, rev_yoy:+22.1},
+  '5289.TWO':   {eps_ly:12.5, eps_ytd:3.1,  gm:42.3, rev_yoy:-8.5},
   '2374.TW':   {eps_ly:4.8,  eps_ytd:1.6,  gm:28.4, rev_yoy:+5.2},
   '0050.TW':   {eps_ly:6.2,  eps_ytd:2.1,  gm:null, rev_yoy:null},
   '0056.TW':   {eps_ly:2.8,  eps_ytd:0.9,  gm:null, rev_yoy:null},
@@ -533,10 +533,10 @@ const FINS = {
   '2412.TW':   {eps_ly:5.2,  eps_ytd:1.8,  gm:58.4, rev_yoy:+2.1},
   '3022.TW':   {eps_ly:6.8,  eps_ytd:3.2,  gm:32.1, rev_yoy:+18.6},
   '1519.TW':   {eps_ly:22.4, eps_ytd:9.8,  gm:22.8, rev_yoy:+35.2},
-  '2465.TW':   {eps_ly:1.2,  eps_ytd:-0.3, gm:14.2, rev_yoy:-18.4},
-  '3526.TW':   {eps_ly:9.6,  eps_ytd:3.8,  gm:28.6, rev_yoy:+12.8},
+  '2465.TWO':   {eps_ly:1.2,  eps_ytd:-0.3, gm:14.2, rev_yoy:-18.4},
+  '3526.TWO':   {eps_ly:9.6,  eps_ytd:3.8,  gm:28.6, rev_yoy:+12.8},
   '3004.TW':   {eps_ly:7.2,  eps_ytd:2.6,  gm:24.5, rev_yoy:+8.4},
-  '3653.TW':   {eps_ly:14.8, eps_ytd:6.2,  gm:38.4, rev_yoy:+28.6},
+  '3653.TWO':   {eps_ly:14.8, eps_ytd:6.2,  gm:38.4, rev_yoy:+28.6},
 };
 
 // ── STATE ────────────────────────────────────────────────
@@ -564,20 +564,15 @@ function isTWSEOpen() {
 }
 
 // ── 方法A：TWSE MIS 即時 API（盤中，無需Key）────────
-// 格式：tse_1303.tw | otc_3526.tw（上櫃用otc）
-// 注意上櫃股票代號：3xxx/4xxx/6xxx 多為上櫃
-const OTC_PREFIXES = ['3','4','6','8'];
+// 根據 .TW = 上市(tse)，.TWO = 上櫃(otc) 判斷
 function toMISCode(code) {
-  const no = code.replace('.TW','');
-  const prefix = no.charAt(0);
-  // ETF（4碼+英文）和特定代號判斷
-  const isETF = no.length > 4 || no.includes('L') || no.includes('A') || no.includes('B');
-  const isOTC = OTC_PREFIXES.includes(prefix) && !isETF;
+  const isOTC = code.endsWith('.TWO');
+  const no = code.replace('.TWO','').replace('.TW','');
   return isOTC ? `otc_${no}.tw` : `tse_${no}.tw`;
 }
 
 async function fetchTWSEMIS(code) {
-  if (!code.endsWith('.TW')) return null;
+  if (!code.endsWith('.TW') && !code.endsWith('.TWO')) return null;
   try {
     const misCode = toMISCode(code);
     const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${misCode}&json=1&delay=0`;
@@ -601,8 +596,8 @@ async function fetchTWSEMIS(code) {
 
 // ── 方法B：TWSE OpenAPI 收盤（盤後，無需Key）───────
 async function fetchTWSEClose(code) {
-  if (!code.endsWith('.TW')) return null;
-  const no = code.replace('.TW','');
+  if (!code.endsWith('.TW') && !code.endsWith('.TWO')) return null;
+  const no = code.replace('.TWO','').replace('.TW','');
   try {
     // 嘗試上市
     const urls = [
@@ -642,8 +637,8 @@ async function fetchFinnhub(code) {
   if (!finnhubKey) return null;
   try {
     // 台股 Finnhub 免費版不支援，只用於美股
-    const sym = code.replace('.TW','');
-    const isTW = code.endsWith('.TW');
+    const sym = code.replace('.TWO','').replace('.TW','');
+    const isTW = code.endsWith('.TW') || code.endsWith('.TWO');
     const finnSym = isTW ? `TWSE:${sym}` : sym;
     const url = `https://finnhub.io/api/v1/quote?symbol=${finnSym}&token=${finnhubKey}`;
     const r = await fetch(url, {signal: AbortSignal.timeout(8000)});
@@ -692,7 +687,7 @@ async function fetchYahoo(code, idx=0) {
 
 // ── 統一入口：智慧選擇最佳來源 ──────────────────────
 async function fetchOne(code) {
-  const isTW = code.endsWith('.TW');
+  const isTW = code.endsWith('.TW') || code.endsWith('.TWO');
   const isOpen = isTWSEOpen();
 
   if (isTW) {
@@ -941,12 +936,12 @@ function renderTable() {
 
     // 三大法人模擬資料（正=買超，負=賣超）
     const INST = {
-      '1303.TW':  -2850, '6261.TW': +1200, '3260.TW': +3400,
-      '5289.TW':  -980,  '2374.TW': +560,  '0050.TW': +18500,
+      '1303.TW':  -2850, '6261.TWO': +1200, '3260.TWO': +3400,
+      '5289.TWO':  -980,  '2374.TW': +560,  '0050.TW': +18500,
       '0056.TW':  +9200, '00631L.TW': -1200,'00981A.TW':+4500,
       '8422.TW':  +220,  '2412.TW': -380,  '3022.TW': +890,
-      '1519.TW':  +3200, '2465.TW': -1500, '3526.TW': +670,
-      '3004.TW':  +430,  '3653.TW': +5800,
+      '1519.TW':  +3200, '2465.TWO': -1500, '3526.TWO': +670,
+      '3004.TW':  +430,  '3653.TWO': +5800,
     };
     const inst = INST[stock.code] ?? 0;
     const instCell = `<div style="text-align:center;font-family:var(--mono);font-size:13px;font-weight:600;color:${inst>0?'var(--up)':inst<0?'var(--dn)':'var(--text2)'}">
@@ -982,7 +977,7 @@ function renderTable() {
     tr.innerHTML = `
       <td onclick="selStk('${stock.code}')">
         <div class="sname">
-          <div class="scode">${stock.code.replace('.TW','')}</div>
+          <div class="scode">${stock.code.replace('.TWO','').replace('.TW','')}</div>
           <div class="sinfo">
             <span class="scname">${stock.name}</span>
             <span class="tbadge ${stock.type}">${tbadge}</span>
@@ -1075,7 +1070,7 @@ function showDetail(code) {
       <button class="det-close" onclick="closeDetail()">✕</button>
       <div class="det-hdr">
         <div>
-          <div class="det-h2">${code.replace('.TW','')}　${stock?.name || ''}</div>
+          <div class="det-h2">${code.replace('.TWO','').replace('.TW','')}　${stock?.name || ''}</div>
           <div class="det-sub">${stock?.sector}　｜　${typeLabel}　｜　資料：${srcLabel}</div>
         </div>
         <div style="text-align:right">
@@ -1259,11 +1254,11 @@ async function runAI(code, name, sector) {
 
   const prompt = `你是台股專業分析師。請用繁體中文，針對以下個股給出完整的${modeStr}分析報告，格式清晰易懂。
 
-個股：${code.replace('.TW','')} ${name}　產業：${sector||stock?.sector||'不明'}
+個股：${code.replace('.TWO','').replace('.TW','')} ${name}　產業：${sector||stock?.sector||'不明'}
 現價：${pd?.price??'不明'} 元　昨收：${pd?.prev??'不明'} 元
 漲跌：${pd?(pd.chg>=0?'+':'')+pd.chg+'元 ('+pd.pct.toFixed(2)+'%)':'不明'}
 今日區間：${pd?pd.low+'～'+pd.high:'不明'}　成交量：${pd?fmt(pd.vol,0)+'張':'不明'}
-三大法人：${(()=>{const INST={'1303.TW':-2850,'6261.TW':1200,'3260.TW':3400,'5289.TW':-980,'2374.TW':560,'0050.TW':18500,'0056.TW':9200,'00631L.TW':-1200,'00981A.TW':4500,'8422.TW':220,'2412.TW':-380,'3022.TW':890,'1519.TW':3200,'2465.TW':-1500,'3526.TW':670,'3004.TW':430,'3653.TW':5800};const v=INST[code]??0;return (v>0?'+':'')+v+'張 '+(v>0?'買超':'賣超')})()}
+三大法人：${(()=>{const INST={'1303.TW':-2850,'6261.TWO':1200,'3260.TWO':3400,'5289.TWO':-980,'2374.TW':560,'0050.TW':18500,'0056.TW':9200,'00631L.TW':-1200,'00981A.TW':4500,'8422.TW':220,'2412.TW':-380,'3022.TW':890,'1519.TW':3200,'2465.TWO':-1500,'3526.TWO':670,'3004.TW':430,'3653.TWO':5800};const v=INST[code]??0;return (v>0?'+':'')+v+'張 '+(v>0?'買超':'賣超')})()}
 技術訊號：${(SIGS[code]||[]).join('、')||'無'}
 EPS（去年/今年累積）：${fin2.eps_ly??'—'} / ${fin2.eps_ytd??'—'}
 毛利率：${fin2.gm??'—'}%　營收YOY：${fin2.rev_yoy??'—'}%
@@ -1284,7 +1279,7 @@ EPS（去年/今年累積）：${fin2.eps_ly??'—'} / ${fin2.eps_ytd??'—'}
     <div style="padding:16px 20px;border-bottom:1px solid #1a2840;display:flex;align-items:center;gap:12px;flex-shrink:0">
       <div style="width:28px;height:28px;background:linear-gradient(135deg,#00c9e8,#0088bb);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#000">AI</div>
       <div>
-        <div style="font-size:15px;font-weight:700;color:#dde6f0;font-family:'JetBrains Mono',monospace">${code.replace('.TW','')} ${name}</div>
+        <div style="font-size:15px;font-weight:700;color:#dde6f0;font-family:'JetBrains Mono',monospace">${code.replace('.TWO','').replace('.TW','')} ${name}</div>
         <div style="font-size:11px;color:#7a9ab8;margin-top:1px">${sector||stock?.sector} ｜ <span style="color:${modeColor};font-weight:600">${modeStr}分析</span> ｜ ${src}</div>
       </div>
       <button onclick="document.getElementById('ai-artifact-overlay').remove()" style="margin-left:auto;background:rgba(61,85,112,.2);border:1px solid #3d5570;color:#8ba4c0;font-size:16px;cursor:pointer;padding:2px 10px;border-radius:5px;line-height:1.5">✕ 關閉</button>
@@ -1443,7 +1438,7 @@ function runMockAnalysis(code, stock, pd, sc, modeStr) {
          ${sigs.includes('KD走弱')||sigs.includes('KD死叉')?'KD 指標走弱，短線謹慎追高。':''}
          ${sigs.includes('突破季線')?'已突破季線壓力，技術面轉為正向。':''}`);
 
-      const INST_DATA = {'1303.TW':-2850,'6261.TW':1200,'3260.TW':3400,'5289.TW':-980,'2374.TW':560,'0050.TW':18500,'0056.TW':9200,'00631L.TW':-1200,'00981A.TW':4500,'8422.TW':220,'2412.TW':-380,'3022.TW':890,'1519.TW':3200,'2465.TW':-1500,'3526.TW':670,'3004.TW':430,'3653.TW':5800};
+      const INST_DATA = {'1303.TW':-2850,'6261.TWO':1200,'3260.TWO':3400,'5289.TWO':-980,'2374.TW':560,'0050.TW':18500,'0056.TW':9200,'00631L.TW':-1200,'00981A.TW':4500,'8422.TW':220,'2412.TW':-380,'3022.TW':890,'1519.TW':3200,'2465.TWO':-1500,'3526.TWO':670,'3004.TW':430,'3653.TWO':5800};
       const instVal = INST_DATA[code] ?? 0;
       const instDesc = instVal > 2000 ? '大幅買超，法人積極建倉，籌碼面強勁有力。' :
                        instVal > 0    ? '小幅買超，法人態度偏正向，持續追蹤。' :
@@ -1561,7 +1556,7 @@ function renderMgrList() {
   }
   el.innerHTML = stocks.map((s,i) => `
     <div class="mgr-item">
-      <div class="mgr-item-code">${s.code.replace('.TW','')}</div>
+      <div class="mgr-item-code">${s.code.replace('.TWO','').replace('.TW','')}</div>
       <div class="mgr-item-name">${s.name}</div>
       <div class="mgr-item-sector">${s.sector}</div>
       <button class="btn-del" onclick="deleteStock(${i})">✕ 刪除</button>
@@ -1589,7 +1584,7 @@ function addStock() {
 function deleteStock(idx) {
   const list = mgrCurrentTab === 'hold' ? holdStocks : watchStocks;
   const s = list[idx];
-  if (!confirm(`確定刪除 ${s.code.replace('.TW','')} ${s.name}？`)) return;
+  if (!confirm(`確定刪除 ${s.code.replace('.TWO','').replace('.TW','')} ${s.name}？`)) return;
   if (mgrCurrentTab === 'hold') holdStocks.splice(idx, 1);
   else watchStocks.splice(idx, 1);
   document.getElementById('tc-hold').textContent  = holdStocks.length;
