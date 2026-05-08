@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -78,14 +77,34 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14
 .mc-sub{font-size:12px;color:var(--text2);margin-top:2px;font-family:var(--mono)}
 
 /* ── TABLE ── */
-.tbl-wrap{padding:14px 18px;overflow-x:auto}
-table{width:100%;border-collapse:collapse;min-width:560px}
-th{font-size:12px;color:var(--text2);letter-spacing:.04em;padding:9px 12px;text-align:right;border-bottom:1px solid var(--border);font-weight:500;white-space:nowrap}
+.tbl-wrap{padding:0 0 14px 0;overflow:hidden;position:relative}
+/* 桌面版正常顯示 */
+table{width:100%;border-collapse:collapse;min-width:900px}
+th{font-size:12px;color:var(--text2);letter-spacing:.04em;padding:9px 12px;text-align:right;border-bottom:1px solid var(--border);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--bg2);z-index:10}
 th:first-child,td:first-child{text-align:left}
 td{padding:10px 8px;border-bottom:1px solid rgba(26,40,64,.6);vertical-align:middle;white-space:nowrap}
 tr{transition:background .12s;cursor:pointer}
 tr:hover td{background:rgba(0,201,232,.04)}
 tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
+
+/* ── 手機版：分割固定+捲動 ── */
+@media(max-width:768px){
+  .tbl-wrap{padding:0;display:flex;overflow:hidden}
+  /* 固定左欄（個股名稱）*/
+  .tbl-fixed{flex-shrink:0;width:130px;overflow:hidden;border-right:1px solid var(--border2);background:var(--bg2);z-index:5}
+  .tbl-fixed table{min-width:130px;width:130px}
+  .tbl-fixed th,.tbl-fixed td{padding:10px 8px;border-right:none}
+  /* 捲動右欄（所有數字）*/
+  .tbl-scroll{flex:1;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
+  .tbl-scroll table{min-width:700px}
+  .tbl-scroll th,.tbl-scroll td{padding:10px 8px}
+  /* 行高同步 */
+  .tbl-fixed td,.tbl-scroll td{height:72px;box-sizing:border-box}
+  /* header sticky */
+  .hdr{position:sticky;top:0;z-index:200}
+  .tabs-wrap{position:sticky;top:57px;z-index:150;background:var(--bg)}
+  .filters{position:sticky;top:100px;z-index:140;background:var(--bg)}
+}
 
 .sname{display:flex;flex-direction:column;gap:3px}
 .scode{font-family:var(--mono);font-size:15px;font-weight:700}
@@ -358,9 +377,9 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
 <!-- NOTICE -->
 <div class="notice">
   📡 <div>
-    <b style="color:var(--accent)">四層備援架構</b>
-    — 台股盤後→TWSE官方API（最準確收盤價）→ Finnhub（盤中即時）→ Yahoo Finance → 模擬資料。
-    <b style="color:#ffd54f">盤後自動切換 TWSE 官方資料</b>，確保收盤價準確，無需任何 API Key。
+    <b style="color:var(--accent)">三層備援架構</b>
+    — 台股：<b style="color:#ffd54f">TWSE 官方 API（盤中即時 / 盤後收盤）</b>→ Yahoo Finance。
+    美股：Finnhub（有Key）→ Yahoo Finance。完全不依賴不穩定的第三方 Proxy 作為主要來源。
   </div>
 </div>
 
@@ -529,151 +548,177 @@ let currentTab = 'hold', selStock = null, activeFilter = 'all', loading = false;
 // 三層備援：Finnhub（主）→ Yahoo+CORS Proxy（備）→ 模擬資料
 let finnhubKey = localStorage.getItem('finnhub_api_key') || '';
 
-// Finnhub 台股代碼轉換（1303.TW → TWSE:1303）
-function toFinnhub(code) {
-  const c = code.replace('.TW','');
-  // ETF 和一般股票都在 TWSE，興櫃用 TPEX
-  return `TWSE:${c}`;
+// ══════════════════════════════════════════════════════
+// 台股資料策略（已確認 Finnhub 免費版不支援台股）
+// 台股盤中：TWSE MIS 即時 API → Yahoo Finance
+// 台股盤後：TWSE OpenAPI 收盤 → Yahoo Finance
+// 美股：Finnhub（有Key）→ Yahoo Finance
+// ══════════════════════════════════════════════════════
+
+// ── 判斷台股交易時段 ─────────────────────────────────
+function isTWSEOpen() {
+  const tw  = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
+  const day = tw.getDay(), h = tw.getHours(), m = tw.getMinutes();
+  const min = h*60+m;
+  return day>=1 && day<=5 && min>=540 && min<=810;
 }
 
-// ── 方法1：Finnhub API（主要，最穩定）──────────────────
+// ── 方法A：TWSE MIS 即時 API（盤中，無需Key）────────
+// 格式：tse_1303.tw | otc_3526.tw（上櫃用otc）
+// 注意上櫃股票代號：3xxx/4xxx/6xxx 多為上櫃
+const OTC_PREFIXES = ['3','4','6','8'];
+function toMISCode(code) {
+  const no = code.replace('.TW','');
+  const prefix = no.charAt(0);
+  // ETF（4碼+英文）和特定代號判斷
+  const isETF = no.length > 4 || no.includes('L') || no.includes('A') || no.includes('B');
+  const isOTC = OTC_PREFIXES.includes(prefix) && !isETF;
+  return isOTC ? `otc_${no}.tw` : `tse_${no}.tw`;
+}
+
+async function fetchTWSEMIS(code) {
+  if (!code.endsWith('.TW')) return null;
+  try {
+    const misCode = toMISCode(code);
+    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${misCode}&json=1&delay=0`;
+    const proxy = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+    const r = await fetch(proxy, {signal: AbortSignal.timeout(8000)});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    const d = j?.msgArray?.[0];
+    if (!d || !d.z || d.z==='-') throw new Error('no realtime data');
+    const price = parseFloat(d.z);   // 成交價
+    const prev  = parseFloat(d.y);   // 昨收
+    const high  = parseFloat(d.h);
+    const low   = parseFloat(d.l);
+    const vol   = Math.round(parseFloat(d.v||0));
+    const chg   = +(price-prev).toFixed(2);
+    const pct   = prev ? +(chg/prev*100).toFixed(2) : 0;
+    if (!price||price===0) throw new Error('price=0');
+    return {price, chg, pct, prev, vol, high, low, src:'twse-mis'};
+  } catch(e) { return null; }
+}
+
+// ── 方法B：TWSE OpenAPI 收盤（盤後，無需Key）───────
+async function fetchTWSEClose(code) {
+  if (!code.endsWith('.TW')) return null;
+  const no = code.replace('.TW','');
+  try {
+    // 嘗試上市
+    const urls = [
+      `https://corsproxy.io/?${encodeURIComponent(`https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY?stockNo=${no}&date=${getTodayStr()}`)}`,
+      `https://corsproxy.io/?${encodeURIComponent(`https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_AVG?stockNo=${no}`)}`,
+    ];
+    for (const url of urls) {
+      try {
+        const r = await fetch(url, {signal: AbortSignal.timeout(8000)});
+        if (!r.ok) continue;
+        const arr = await r.json();
+        if (!arr||!arr.length) continue;
+        const latest = arr[arr.length-1];
+        // 欄位名稱可能是中文或英文
+        const price = parseFloat(latest.ClosingPrice||latest['收盤價']||latest.close||0);
+        const prev  = arr.length>=2 ? parseFloat(arr[arr.length-2].ClosingPrice||arr[arr.length-2]['收盤價']||price) : price;
+        const high  = parseFloat(latest.HighestPrice||latest['最高價']||price);
+        const low   = parseFloat(latest.LowestPrice||latest['最低價']||price);
+        const vol   = Math.round(parseFloat(latest.TradeVolume||latest['成交股數']||latest.TradeValue||0)/1000);
+        const chg   = +(price-prev).toFixed(2);
+        const pct   = prev ? +(chg/prev*100).toFixed(2) : 0;
+        if (!price||price===0) continue;
+        return {price, chg, pct, prev, vol, high, low, src:'twse'};
+      } catch(e2) { continue; }
+    }
+    return null;
+  } catch(e) { return null; }
+}
+
+function getTodayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// ── 方法C：Finnhub（美股用，台股免費版不支援）───────
 async function fetchFinnhub(code) {
   if (!finnhubKey) return null;
   try {
-    const sym = toFinnhub(code);
-    const url = `https://finnhub.io/api/v1/quote?symbol=${sym}&token=${finnhubKey}`;
+    // 台股 Finnhub 免費版不支援，只用於美股
+    const sym = code.replace('.TW','');
+    const isTW = code.endsWith('.TW');
+    const finnSym = isTW ? `TWSE:${sym}` : sym;
+    const url = `https://finnhub.io/api/v1/quote?symbol=${finnSym}&token=${finnhubKey}`;
     const r = await fetch(url, {signal: AbortSignal.timeout(8000)});
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
-    if (!d.c || d.c === 0) throw new Error('no data');
-    const price = d.c;  // current price
-    const prev  = d.pc; // previous close
-    const chg   = +(price - prev).toFixed(2);
-    const pct   = prev ? +(chg / prev * 100).toFixed(2) : 0;
-    return {
-      price: +price.toFixed(2), chg, pct,
-      prev:  +prev.toFixed(2),
-      vol:   0,  // Finnhub free 不含量
-      high:  +(d.h||price).toFixed(2),
-      low:   +(d.l||price).toFixed(2),
-      src:   'finnhub',
-    };
-  } catch(e) {
-    return null;
-  }
+    if (!d.c || d.c===0 || d.error) throw new Error('no data or premium required');
+    const price=d.c, prev=d.pc;
+    const chg=+(price-prev).toFixed(2), pct=prev?+(chg/prev*100).toFixed(2):0;
+    return {price:+price.toFixed(2),chg,pct,prev:+prev.toFixed(2),
+            vol:0,high:+(d.h||price).toFixed(2),low:+(d.l||price).toFixed(2),src:'finnhub'};
+  } catch(e) { return null; }
 }
 
-// ── 方法2：Yahoo Finance + CORS Proxy（備援）───────────
+// ── 方法D：Yahoo Finance + 多個 CORS Proxy（通用備援）
 const YF_PROXIES = [
-  c => `https://corsproxy.io/?${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${c}?interval=1d&range=5d`)}`,
-  c => `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${c}?interval=1d&range=5d`)}`,
+  c=>`https://corsproxy.io/?${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${c}?interval=1d&range=5d`)}`,
+  c=>`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${c}?interval=1d&range=5d`)}`,
+  c=>`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${c}?interval=1d&range=5d`)}`,
 ];
 
-async function fetchYahoo(code, idx = 0) {
-  if (idx >= YF_PROXIES.length) return null;
+async function fetchYahoo(code, idx=0) {
+  if (idx>=YF_PROXIES.length) return null;
   try {
-    const r = await fetch(YF_PROXIES[idx](code), {signal: AbortSignal.timeout(8000)});
+    const r = await fetch(YF_PROXIES[idx](code), {signal: AbortSignal.timeout(10000)});
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const j = await r.json();
     const meta = j?.chart?.result?.[0]?.meta;
     if (!meta) throw new Error('no meta');
-    const price = meta.regularMarketPrice ?? meta.previousClose;
-    const prev  = meta.chartPreviousClose ?? meta.previousClose ?? price;
-    const chg   = +(price - prev).toFixed(2);
-    const pct   = prev ? +(chg / prev * 100).toFixed(2) : 0;
-    const closes = j.chart.result[0].indicators?.quote?.[0]?.close?.filter(Boolean) ?? [];
-    if (closes.length >= 2) SPARK[code] = closes.slice(-5).map(v => +v.toFixed(2));
-    return {
-      price: +price.toFixed(2), chg, pct,
-      prev:  +prev.toFixed(2),
-      vol:   Math.round((meta.regularMarketVolume ?? 0) / 1000),
-      high:  +(meta.regularMarketDayHigh ?? price).toFixed(2),
-      low:   +(meta.regularMarketDayLow  ?? price).toFixed(2),
-      src:   'yahoo',
-    };
+    const price=meta.regularMarketPrice??meta.previousClose;
+    const prev=meta.chartPreviousClose??meta.previousClose??price;
+    const chg=+(price-prev).toFixed(2), pct=prev?+(chg/prev*100).toFixed(2):0;
+    const closes=j.chart.result[0].indicators?.quote?.[0]?.close?.filter(Boolean)??[];
+    if (closes.length>=2) SPARK[code]=closes.slice(-5).map(v=>+v.toFixed(2));
+    return {price:+price.toFixed(2),chg,pct,prev:+prev.toFixed(2),
+            vol:Math.round((meta.regularMarketVolume??0)/1000),
+            high:+(meta.regularMarketDayHigh??price).toFixed(2),
+            low:+(meta.regularMarketDayLow??price).toFixed(2),src:'yahoo'};
   } catch(e) {
-    if (idx + 1 < YF_PROXIES.length) {
-      addLog('warn', `${code} Yahoo proxy${idx+1} 失敗，切換備用…`);
-      return fetchYahoo(code, idx + 1);
+    if (idx+1<YF_PROXIES.length) {
+      addLog('warn',`${code} Yahoo proxy${idx+1}失敗，切換備用…`);
+      return fetchYahoo(code,idx+1);
     }
     return null;
   }
 }
 
-// ── 方法3：TWSE 官方 OpenAPI（台股盤後最可靠）──────────
-// 直接呼叫，無需 Key，無 CORS 問題，盤後保留當日收盤資料
-const TWSE_PROXY = c => `https://corsproxy.io/?${encodeURIComponent(`https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_AVG?stockNo=${c}`)}`;
-
-async function fetchTWSE(code) {
-  // 只處理台股（.TW 結尾）
-  if (!code.endsWith('.TW')) return null;
-  const stockNo = code.replace('.TW','');
-  // ETF 代碼 5 碼以上
-  try {
-    const url = TWSE_PROXY(stockNo);
-    const r = await fetch(url, {signal: AbortSignal.timeout(8000)});
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const arr = await r.json();
-    if (!arr || !arr.length) throw new Error('no data');
-    // 取最新一筆（最後一個交易日）
-    const latest = arr[arr.length - 1];
-    const price = parseFloat(latest.ClosingPrice || latest.收盤價 || 0);
-    const open  = parseFloat(latest.OpeningPrice || latest.開盤價 || price);
-    const high  = parseFloat(latest.HighestPrice || latest.最高價 || price);
-    const low   = parseFloat(latest.LowestPrice  || latest.最低價 || price);
-    const vol   = Math.round(parseFloat(latest.TradeVolume || latest.成交股數 || 0) / 1000);
-    const prev  = arr.length >= 2 ? parseFloat(arr[arr.length-2].ClosingPrice || arr[arr.length-2].收盤價 || price) : price;
-    const chg   = +(price - prev).toFixed(2);
-    const pct   = prev ? +(chg / prev * 100).toFixed(2) : 0;
-    if (!price || price === 0) throw new Error('price=0');
-    return { price, chg, pct, prev, vol, high, low, src: 'twse' };
-  } catch(e) {
-    return null;
-  }
-}
-
-// 判斷是否在台股交易時間內（9:00-13:30 台北時間，週一至週五）
-function isTWSEMarketOpen() {
-  const now = new Date();
-  const tw  = new Date(now.toLocaleString('en-US', {timeZone:'Asia/Taipei'}));
-  const day = tw.getDay();   // 0=日,6=六
-  const h   = tw.getHours(), m = tw.getMinutes();
-  const min = h * 60 + m;
-  return day >= 1 && day <= 5 && min >= 540 && min <= 810; // 9:00~13:30
-}
-
-// ── 統一入口：智慧選擇最佳資料來源 ──────────────────────
-// 台股：盤中→Finnhub，盤後→TWSE官方API，備援→Yahoo
-// 美股：Finnhub（有Key），備援→Yahoo
+// ── 統一入口：智慧選擇最佳來源 ──────────────────────
 async function fetchOne(code) {
   const isTW = code.endsWith('.TW');
-  const isOpen = isTWSEMarketOpen();
+  const isOpen = isTWSEOpen();
 
-  if (isTW && !isOpen) {
-    // 台股盤後：優先用 TWSE 官方 API（最準確的收盤資料）
-    const d0 = await fetchTWSE(code);
-    if (d0) {
-      addLog('ok', `✓ ${code} [TWSE官方] 收盤 ${d0.price} ${d0.chg>=0?'+':''}${d0.chg}(${d0.pct}%)`);
-      return d0;
+  if (isTW) {
+    if (isOpen) {
+      // 台股盤中：TWSE MIS 即時
+      const d = await fetchTWSEMIS(code);
+      if (d) { addLog('ok',`✓ ${code} [TWSE即時] ${d.price} ${d.chg>=0?'+':''}${d.chg}(${d.pct}%)`); return d; }
+      addLog('warn',`${code} TWSE MIS 失敗，改用 Yahoo…`);
+    } else {
+      // 台股盤後：TWSE OpenAPI 收盤
+      const d = await fetchTWSEClose(code);
+      if (d) { addLog('ok',`✓ ${code} [TWSE收盤] ${d.price} ${d.chg>=0?'+':''}${d.chg}(${d.pct}%)`); return d; }
+      addLog('warn',`${code} TWSE收盤API失敗，改用 Yahoo…`);
     }
-    addLog('warn', `${code} TWSE API 失敗，改用其他來源…`);
-  }
-
-  // 盤中 或 TWSE失敗：用 Finnhub（有Key才試）
-  if (finnhubKey) {
-    const d1 = await fetchFinnhub(code);
-    if (d1) {
-      addLog('ok', `✓ ${code} [Finnhub] ${d1.price} ${d1.chg>=0?'+':''}${d1.chg}`);
-      return d1;
+    // 台股備援：Yahoo Finance
+    const dy = await fetchYahoo(code);
+    if (dy) { addLog('ok',`✓ ${code} [Yahoo] ${dy.price} ${dy.chg>=0?'+':''}${dy.chg}`); return dy; }
+  } else {
+    // 美股：Finnhub → Yahoo
+    if (finnhubKey) {
+      const df = await fetchFinnhub(code);
+      if (df) { addLog('ok',`✓ ${code} [Finnhub] ${df.price} ${df.chg>=0?'+':''}${df.chg}`); return df; }
+      addLog('warn',`${code} Finnhub失敗，改用Yahoo…`);
     }
-    addLog('warn', `${code} Finnhub 失敗，改用 Yahoo…`);
-  }
-
-  // 最後備援：Yahoo Finance
-  const d2 = await fetchYahoo(code);
-  if (d2) {
-    addLog('ok', `✓ ${code} [Yahoo] ${d2.price} ${d2.chg>=0?'+':''}${d2.chg}`);
-    return d2;
+    const dy = await fetchYahoo(code);
+    if (dy) { addLog('ok',`✓ ${code} [Yahoo] ${dy.price} ${dy.chg>=0?'+':''}${dy.chg}`); return dy; }
   }
   return null;
 }
