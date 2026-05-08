@@ -185,6 +185,25 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
 .btn-del:hover{background:rgba(255,79,79,.2)}
 .mgr-empty{text-align:center;color:var(--text3);font-size:12px;padding:20px}
 
+
+/* ── GEMINI KEY PANEL ── */
+.key-panel{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:600;display:flex;align-items:center;justify-content:center;padding:20px}
+.key-modal{background:#0d1624;border:1px solid #243554;border-radius:16px;padding:28px;width:100%;max-width:480px}
+.key-modal h3{font-size:16px;font-weight:700;color:#dde6f0;margin-bottom:6px}
+.key-modal p{font-size:12px;color:#7a9ab8;line-height:1.7;margin-bottom:18px}
+.key-input{width:100%;background:#0a0e1a;border:1px solid #243554;border-radius:8px;color:#dde6f0;padding:10px 14px;font-family:'JetBrains Mono',monospace;font-size:13px;outline:none;transition:border .2s;margin-bottom:10px}
+.key-input:focus{border-color:#00c9e8}
+.key-status{font-size:11px;margin-bottom:14px;min-height:16px;font-family:'JetBrains Mono',monospace}
+.key-status.ok{color:#00e676}.key-status.err{color:#ff4f4f}.key-status.testing{color:#ffab00}
+.key-btns{display:flex;gap:8px;justify-content:flex-end}
+.btn-test{padding:7px 16px;background:rgba(0,201,232,.1);border:1px solid rgba(0,201,232,.3);color:#00c9e8;border-radius:6px;cursor:pointer;font-size:12px;font-family:var(--sans)}
+.btn-test:hover{background:rgba(0,201,232,.2)}
+.btn-save{padding:7px 18px;background:#0088bb;border:none;border-radius:6px;color:#fff;font-size:12px;cursor:pointer;font-family:var(--sans);font-weight:500}
+.btn-save:hover{background:#00a8d8}
+.btn-cancel{padding:7px 14px;background:transparent;border:1px solid #243554;border-radius:6px;color:#7a9ab8;font-size:12px;cursor:pointer;font-family:var(--sans)}
+.key-indicator{display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer}
+.key-indicator:hover{color:#dde6f0}
+
 .notice{margin:10px 18px;background:rgba(0,201,232,.04);border:1px solid rgba(0,201,232,.15);border-radius:8px;padding:10px 14px;font-size:11px;color:var(--text2);display:flex;align-items:flex-start;gap:8px}
 
 /* ── RESPONSIVE ── */
@@ -213,6 +232,7 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
       <button class="mode-btn active" onclick="setMode('before')">盤前</button>
       <button class="mode-btn" onclick="setMode('after')">盤後</button>
     </div>
+    <button class="key-indicator icon-btn" id="gemini-key-btn" onclick="openKeyPanel()" title="設定 Gemini API Key"><span id="gemini-dot" style="width:7px;height:7px;border-radius:50%;background:var(--text3)"></span> <span id="gemini-key-label">AI 未設定</span></button>
     <button class="icon-btn" onclick="openMgr()" style="border-color:rgba(0,201,232,.5);color:var(--accent)">⚙ 管理個股</button>
     <button class="icon-btn" id="ref-btn" onclick="fetchAllPrices()" style="border-color:rgba(0,201,232,.5);color:var(--accent)">↻ 抓取報價</button>
   </div>
@@ -227,6 +247,62 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
     <span class="mb-tag">確認技術型態</span>
     <span class="mb-tag">檢查重要支撐/壓力</span>
     <span class="mb-tag">注意大盤期指方向</span>
+  </div>
+</div>
+
+<!-- GEMINI KEY PANEL -->
+<div class="key-panel" id="key-panel" style="display:none">
+  <div class="key-modal">
+    <h3>🔑 API Key 設定</h3>
+    <div style="display:flex;gap:6px;margin-bottom:14px">
+      <button onclick="switchKeyTab('gemini')" id="kt-gemini" style="padding:5px 14px;font-size:12px;background:rgba(0,201,232,.15);border:1px solid rgba(0,201,232,.4);color:#00c9e8;border-radius:5px;cursor:pointer;font-family:var(--sans)">🤖 Gemini AI 分析</button>
+      <button onclick="switchKeyTab('finnhub')" id="kt-finnhub" style="padding:5px 14px;font-size:12px;background:transparent;border:1px solid #243554;color:#7a9ab8;border-radius:5px;cursor:pointer;font-family:var(--sans)">📈 Finnhub 股價</button>
+    </div>
+    <!-- Gemini Tab -->
+    <div id="tab-gemini">
+      <p style="font-size:12px;color:#7a9ab8;line-height:1.7;margin-bottom:14px">
+        前往 <b style="color:#00c9e8">aistudio.google.com</b> → 左側「Get API Key」→「Create API key」。<br>
+        <b>免費，不需信用卡，每天 250 次以上</b>，不耗 Claude Pro 額度。
+      </p>
+      <input class="key-input" id="key-input" type="password" placeholder="貼上 Gemini AIza 開頭的 API Key">
+      <div class="key-status" id="key-status"></div>
+      <div class="key-btns">
+        <button class="btn-cancel" onclick="closeKeyPanel()">取消</button>
+        <button class="btn-test" onclick="testKey()">🧪 測試</button>
+        <button class="btn-save" onclick="saveKey()">💾 儲存</button>
+      </div>
+    </div>
+    <!-- Finnhub Tab -->
+    <div id="tab-finnhub" style="display:none">
+      <p style="font-size:12px;color:#7a9ab8;line-height:1.7;margin-bottom:14px">
+        前往 <b style="color:#00c9e8">finnhub.io</b> → 免費註冊 → Dashboard 取得 API Key。<br>
+        <b>免費，每分鐘 60 次，直接呼叫無 CORS 問題</b>，比 Yahoo Finance 更穩定。<br>
+        台股格式：TWSE:1303（上市）/ TPEX:3481（上櫃）自動轉換。
+      </p>
+      <input class="key-input" id="finnhub-key-input" type="password" placeholder="貼上 Finnhub API Key（如 d1234abcd…）">
+      <div class="key-status" id="finnhub-key-status"></div>
+      <div class="key-btns">
+        <button class="btn-cancel" onclick="closeKeyPanel()">取消</button>
+        <button class="btn-test" onclick="testFinnhubKey()">🧪 測試</button>
+        <button class="btn-save" onclick="saveFinnhubKey()">💾 儲存</button>
+      </div>
+    </div>
+    <p>
+      前往 <b style="color:#00c9e8">aistudio.google.com</b> → 左側「Get API Key」→「Create API key」取得。<br>
+      完全免費，不需信用卡，每天可分析 250 次以上。<br>
+      Key 只儲存在你的瀏覽器本機，不會上傳到任何伺服器。
+    </p>
+    <input class="key-input" id="key-input" type="password" placeholder="貼上 AIza 開頭的 API Key">
+    <div class="key-status" id="key-status"></div>
+    <div class="key-btns">
+      <button class="btn-cancel" onclick="closeKeyPanel()">取消</button>
+      <button class="btn-test" onclick="testKey()">🧪 測試連線</button>
+      <button class="btn-save" onclick="saveKey()">💾 儲存並啟用</button>
+    </div>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid #1a2840;font-size:10px;color:#3d5570;line-height:1.6">
+      ⚠ 免費版免責聲明：Google 可能使用免費方案的輸入資料來改善模型。若介意，可改用付費方案（Gemini Tier 1）。<br>
+      Key 儲存後下次開啟看板時自動載入，清除瀏覽器快取會清除 Key。
+    </div>
   </div>
 </div>
 
@@ -257,7 +333,7 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
 
 <!-- API STATUS -->
 <div class="api-bar">
-  <div class="api-item"><div class="api-dot off" id="dot-yahoo"></div><span class="api-label">Yahoo Finance</span></div>
+  <div class="api-item"><div class="api-dot off" id="dot-finnhub"></div><span class="api-label" id="data-src-label">Finnhub</span></div>
   <div class="api-item"><div class="api-dot off" id="dot-proxy"></div><span class="api-label">CORS Proxy</span></div>
   <div class="api-item"><div class="api-dot off" id="dot-ai"></div><span class="api-label">Claude AI</span></div>
   <div class="api-item">
@@ -274,12 +350,17 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
 </div>
 <div class="fetch-log" id="fetch-log"></div>
 
+<!-- DATA QUALITY NOTICE -->
+<div style="padding:6px 18px;background:rgba(255,171,0,.05);border-bottom:1px solid rgba(255,171,0,.15);font-size:11px;color:var(--warn);display:flex;align-items:center;gap:8px">
+  ⚠ <span>欄位標示 <b>⚠</b> 者（EPS/毛利率/營收YOY）為<b>模擬示範資料</b>，非真實財報。昨收標示「(估)」者為反推計算，非API直接取得。請以實際財報為準。</span>
+</div>
+
 <!-- NOTICE -->
 <div class="notice">
   📡 <div>
-    <b style="color:var(--accent)">Yahoo Finance（15分鐘延遲）</b>
-    — 點「↻ 抓取報價」自動取得所有個股最新報價，適合盤後技術分析與進階指標研究。
-    抓取失敗時自動切換備用 Proxy，最終回退至模擬資料。
+    <b style="color:var(--accent)">四層備援架構</b>
+    — 台股盤後→TWSE官方API（最準確收盤價）→ Finnhub（盤中即時）→ Yahoo Finance → 模擬資料。
+    <b style="color:#ffd54f">盤後自動切換 TWSE 官方資料</b>，確保收盤價準確，無需任何 API Key。
   </div>
 </div>
 
@@ -416,7 +497,8 @@ const SPARK = {
   '3653.TW':   [180,183,188,193,198],
 };
 
-// ── 財務資料（手動維護，每季更新）───────────────────────
+// ── 財務資料（⚠ 以下為模擬示範數據，非真實財報）───────────
+// 實際使用請自行至 https://mops.twse.com.tw 查詢並更新
 // eps_ly: 去年全年EPS, eps_ytd: 今年累積EPS, gm: 毛利率%, rev_yoy: 營收YOY%
 const FINS = {
   '1303.TW':   {eps_ly:2.1,  eps_ytd:0.8,  gm:12.5, rev_yoy:-3.2},
@@ -443,18 +525,54 @@ let priceData = {};
 let priceSource = {};  // 'live' | 'mock'
 let currentTab = 'hold', selStock = null, activeFilter = 'all', loading = false;
 
-// ── CORS PROXIES（依序嘗試）──────────────────────────────
-const PROXIES = [
+// ── 資料來源設定 ─────────────────────────────────────────
+// 三層備援：Finnhub（主）→ Yahoo+CORS Proxy（備）→ 模擬資料
+let finnhubKey = localStorage.getItem('finnhub_api_key') || '';
+
+// Finnhub 台股代碼轉換（1303.TW → TWSE:1303）
+function toFinnhub(code) {
+  const c = code.replace('.TW','');
+  // ETF 和一般股票都在 TWSE，興櫃用 TPEX
+  return `TWSE:${c}`;
+}
+
+// ── 方法1：Finnhub API（主要，最穩定）──────────────────
+async function fetchFinnhub(code) {
+  if (!finnhubKey) return null;
+  try {
+    const sym = toFinnhub(code);
+    const url = `https://finnhub.io/api/v1/quote?symbol=${sym}&token=${finnhubKey}`;
+    const r = await fetch(url, {signal: AbortSignal.timeout(8000)});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    if (!d.c || d.c === 0) throw new Error('no data');
+    const price = d.c;  // current price
+    const prev  = d.pc; // previous close
+    const chg   = +(price - prev).toFixed(2);
+    const pct   = prev ? +(chg / prev * 100).toFixed(2) : 0;
+    return {
+      price: +price.toFixed(2), chg, pct,
+      prev:  +prev.toFixed(2),
+      vol:   0,  // Finnhub free 不含量
+      high:  +(d.h||price).toFixed(2),
+      low:   +(d.l||price).toFixed(2),
+      src:   'finnhub',
+    };
+  } catch(e) {
+    return null;
+  }
+}
+
+// ── 方法2：Yahoo Finance + CORS Proxy（備援）───────────
+const YF_PROXIES = [
   c => `https://corsproxy.io/?${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${c}?interval=1d&range=5d`)}`,
   c => `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${c}?interval=1d&range=5d`)}`,
-  c => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${c}?interval=1d&range=5d`)}`,
 ];
 
-// ── FETCH 單一個股 ───────────────────────────────────────
-async function fetchOne(code, idx = 0) {
-  if (idx >= PROXIES.length) return null;
+async function fetchYahoo(code, idx = 0) {
+  if (idx >= YF_PROXIES.length) return null;
   try {
-    const r = await fetch(PROXIES[idx](code), {signal: AbortSignal.timeout(8000)});
+    const r = await fetch(YF_PROXIES[idx](code), {signal: AbortSignal.timeout(8000)});
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const j = await r.json();
     const meta = j?.chart?.result?.[0]?.meta;
@@ -463,23 +581,101 @@ async function fetchOne(code, idx = 0) {
     const prev  = meta.chartPreviousClose ?? meta.previousClose ?? price;
     const chg   = +(price - prev).toFixed(2);
     const pct   = prev ? +(chg / prev * 100).toFixed(2) : 0;
-    // 更新近5日走勢為真實資料
     const closes = j.chart.result[0].indicators?.quote?.[0]?.close?.filter(Boolean) ?? [];
     if (closes.length >= 2) SPARK[code] = closes.slice(-5).map(v => +v.toFixed(2));
     return {
       price: +price.toFixed(2), chg, pct,
       prev:  +prev.toFixed(2),
-      vol:  Math.round((meta.regularMarketVolume ?? 0) / 1000),
-      high: +(meta.regularMarketDayHigh ?? price).toFixed(2),
-      low:  +(meta.regularMarketDayLow  ?? price).toFixed(2),
+      vol:   Math.round((meta.regularMarketVolume ?? 0) / 1000),
+      high:  +(meta.regularMarketDayHigh ?? price).toFixed(2),
+      low:   +(meta.regularMarketDayLow  ?? price).toFixed(2),
+      src:   'yahoo',
     };
   } catch(e) {
-    if (idx + 1 < PROXIES.length) {
-      addLog('warn', `${code} proxy${idx+1} 失敗 (${e.message})，切換備用…`);
-      return fetchOne(code, idx + 1);
+    if (idx + 1 < YF_PROXIES.length) {
+      addLog('warn', `${code} Yahoo proxy${idx+1} 失敗，切換備用…`);
+      return fetchYahoo(code, idx + 1);
     }
     return null;
   }
+}
+
+// ── 方法3：TWSE 官方 OpenAPI（台股盤後最可靠）──────────
+// 直接呼叫，無需 Key，無 CORS 問題，盤後保留當日收盤資料
+const TWSE_PROXY = c => `https://corsproxy.io/?${encodeURIComponent(`https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_AVG?stockNo=${c}`)}`;
+
+async function fetchTWSE(code) {
+  // 只處理台股（.TW 結尾）
+  if (!code.endsWith('.TW')) return null;
+  const stockNo = code.replace('.TW','');
+  // ETF 代碼 5 碼以上
+  try {
+    const url = TWSE_PROXY(stockNo);
+    const r = await fetch(url, {signal: AbortSignal.timeout(8000)});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const arr = await r.json();
+    if (!arr || !arr.length) throw new Error('no data');
+    // 取最新一筆（最後一個交易日）
+    const latest = arr[arr.length - 1];
+    const price = parseFloat(latest.ClosingPrice || latest.收盤價 || 0);
+    const open  = parseFloat(latest.OpeningPrice || latest.開盤價 || price);
+    const high  = parseFloat(latest.HighestPrice || latest.最高價 || price);
+    const low   = parseFloat(latest.LowestPrice  || latest.最低價 || price);
+    const vol   = Math.round(parseFloat(latest.TradeVolume || latest.成交股數 || 0) / 1000);
+    const prev  = arr.length >= 2 ? parseFloat(arr[arr.length-2].ClosingPrice || arr[arr.length-2].收盤價 || price) : price;
+    const chg   = +(price - prev).toFixed(2);
+    const pct   = prev ? +(chg / prev * 100).toFixed(2) : 0;
+    if (!price || price === 0) throw new Error('price=0');
+    return { price, chg, pct, prev, vol, high, low, src: 'twse' };
+  } catch(e) {
+    return null;
+  }
+}
+
+// 判斷是否在台股交易時間內（9:00-13:30 台北時間，週一至週五）
+function isTWSEMarketOpen() {
+  const now = new Date();
+  const tw  = new Date(now.toLocaleString('en-US', {timeZone:'Asia/Taipei'}));
+  const day = tw.getDay();   // 0=日,6=六
+  const h   = tw.getHours(), m = tw.getMinutes();
+  const min = h * 60 + m;
+  return day >= 1 && day <= 5 && min >= 540 && min <= 810; // 9:00~13:30
+}
+
+// ── 統一入口：智慧選擇最佳資料來源 ──────────────────────
+// 台股：盤中→Finnhub，盤後→TWSE官方API，備援→Yahoo
+// 美股：Finnhub（有Key），備援→Yahoo
+async function fetchOne(code) {
+  const isTW = code.endsWith('.TW');
+  const isOpen = isTWSEMarketOpen();
+
+  if (isTW && !isOpen) {
+    // 台股盤後：優先用 TWSE 官方 API（最準確的收盤資料）
+    const d0 = await fetchTWSE(code);
+    if (d0) {
+      addLog('ok', `✓ ${code} [TWSE官方] 收盤 ${d0.price} ${d0.chg>=0?'+':''}${d0.chg}(${d0.pct}%)`);
+      return d0;
+    }
+    addLog('warn', `${code} TWSE API 失敗，改用其他來源…`);
+  }
+
+  // 盤中 或 TWSE失敗：用 Finnhub（有Key才試）
+  if (finnhubKey) {
+    const d1 = await fetchFinnhub(code);
+    if (d1) {
+      addLog('ok', `✓ ${code} [Finnhub] ${d1.price} ${d1.chg>=0?'+':''}${d1.chg}`);
+      return d1;
+    }
+    addLog('warn', `${code} Finnhub 失敗，改用 Yahoo…`);
+  }
+
+  // 最後備援：Yahoo Finance
+  const d2 = await fetchYahoo(code);
+  if (d2) {
+    addLog('ok', `✓ ${code} [Yahoo] ${d2.price} ${d2.chg>=0?'+':''}${d2.chg}`);
+    return d2;
+  }
+  return null;
 }
 
 // ── FETCH 全部 ───────────────────────────────────────────
@@ -489,9 +685,10 @@ async function fetchAllPrices() {
   const btn = document.getElementById('ref-btn');
   btn.classList.add('loading-btn');
   btn.innerHTML = '<span class="spin">↻</span> 抓取中…';
-  setDot('dot-yahoo','off'); setDot('dot-proxy','off');
+  setDot('dot-finnhub','off'); setDot('dot-proxy','off');
   clearLog();
-  addLog('info', `開始抓取 Yahoo Finance，共 ${holdStocks.length + watchStocks.length} 檔…`);
+  addLog('info', `開始抓取股價（${finnhubKey?'Finnhub主/Yahoo備':'Yahoo Finance備援'}），共 ${holdStocks.length + watchStocks.length} 檔…`);
+  document.getElementById('data-src-label').textContent = finnhubKey ? 'Finnhub + Yahoo備援' : 'Yahoo Finance';
 
   const all = [...holdStocks, ...watchStocks];
   let ok = 0, fail = 0;
@@ -516,11 +713,11 @@ async function fetchAllPrices() {
 
   const sb = document.getElementById('src-badge');
   if (ok > 0) {
-    setDot('dot-yahoo','ok'); setDot('dot-proxy','ok');
+    setDot('dot-finnhub','ok'); setDot('dot-proxy','ok');
     sb.textContent = ok === all.length ? 'LIVE' : `${ok}L/${fail}M`;
     sb.className   = ok === all.length ? 'src-live' : 'src-mock';
   } else {
-    setDot('dot-yahoo','err'); setDot('dot-proxy','err');
+    setDot('dot-finnhub','err'); setDot('dot-proxy','err');
     sb.textContent = 'MOCK'; sb.className = 'src-mock';
   }
 
@@ -656,9 +853,9 @@ function renderTable() {
     <th>漲跌</th>
     <th title="當日成交量（非交易時間顯示前一交易日）">量（張）</th>
     <th style="text-align:center" title="外資+投信+自營商買賣超合計（張）">三大法人</th>
-    <th style="text-align:center" title="去年EPS / 今年累積EPS">EPS</th>
-    <th style="text-align:center" title="最新季度毛利率">毛利率</th>
-    <th style="text-align:center" title="最新月營收年增率">營收YOY</th>
+    <th style="text-align:center" title="模擬財務數據，僅供格式展示，請自行更新實際數字">EPS ⚠</th>
+    <th style="text-align:center" title="模擬財務數據，僅供格式展示">毛利率 ⚠</th>
+    <th style="text-align:center" title="模擬財務數據，僅供格式展示">營收YOY ⚠</th>
     <th>技術訊號</th>
     <th style="text-align:center">近5日走勢</th>
     <th style="text-align:center">評分</th>
@@ -693,7 +890,9 @@ function renderTable() {
          </div>`
       : `<span class="skel" style="width:50px;height:14px"></span>`;
 
+    // 昨收：優先用API的chartPreviousClose，次選反推，並標示可靠度
     const prevClose = pd?.prev ?? (pd ? +(pd.price - pd.chg).toFixed(2) : null);
+    const prevSrc   = pd?.prev ? 'API' : 'est';  // API=直接取得 est=反推估算
 
     // 三大法人模擬資料（正=買超，負=賣超）
     const INST = {
@@ -744,7 +943,7 @@ function renderTable() {
             <span class="tbadge ${stock.type}">${tbadge}</span>
             <span class="ibadge">${stock.sector}</span>
           </div>
-          ${prevClose ? `<div style="font-size:11px;color:var(--text2);font-family:var(--mono);margin-top:2px">昨收 ${fmt(prevClose,2)}</div>` : ''}
+          ${prevClose ? `<div style="font-size:11px;color:var(--text2);font-family:var(--mono);margin-top:2px">昨收 ${fmt(prevClose,2)}<span style="font-size:9px;color:var(--text3);margin-left:3px">${prevSrc==="est"?"(估)":""}</span></div>` : ''}
         </div>
       </td>
       <td style="text-align:right" onclick="selStk('${stock.code}')">${priceCell}</td>
@@ -888,8 +1087,120 @@ function showDetail(code) {
   </div>`;
 }
 
-// ── AI 分析 Artifact 視窗 ────────────────────────────────
-function runAI(code, name, sector) {
+// ── Gemini Key 管理 ──────────────────────────────────────
+let geminiKey = localStorage.getItem('gemini_api_key') || '';
+
+function switchKeyTab(tab) {
+  document.getElementById('tab-gemini').style.display  = tab==='gemini'?'block':'none';
+  document.getElementById('tab-finnhub').style.display = tab==='finnhub'?'block':'none';
+  document.getElementById('kt-gemini').style.background  = tab==='gemini'?'rgba(0,201,232,.15)':'transparent';
+  document.getElementById('kt-gemini').style.borderColor  = tab==='gemini'?'rgba(0,201,232,.4)':'#243554';
+  document.getElementById('kt-gemini').style.color  = tab==='gemini'?'#00c9e8':'#7a9ab8';
+  document.getElementById('kt-finnhub').style.background = tab==='finnhub'?'rgba(0,201,232,.15)':'transparent';
+  document.getElementById('kt-finnhub').style.borderColor = tab==='finnhub'?'rgba(0,201,232,.4)':'#243554';
+  document.getElementById('kt-finnhub').style.color = tab==='finnhub'?'#00c9e8':'#7a9ab8';
+  if (tab==='finnhub') document.getElementById('finnhub-key-input').value = finnhubKey;
+}
+
+async function testFinnhubKey() {
+  const key = document.getElementById('finnhub-key-input').value.trim();
+  if (!key) { setFinnhubStatus('請先輸入 API Key', 'err'); return; }
+  setFinnhubStatus('測試連線中…', 'testing');
+  try {
+    const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=TWSE:2330&token=${key}`, {signal: AbortSignal.timeout(8000)});
+    const d = await r.json();
+    if (d.c && d.c > 0) {
+      setFinnhubStatus(`✅ 連線成功！台積電現價 ${d.c} 元`, 'ok');
+    } else if (d.error) {
+      setFinnhubStatus('❌ Key 無效：' + d.error, 'err');
+    } else {
+      setFinnhubStatus('⚠ 回應異常，台股可能盤後無資料，明天盤中再試', 'testing');
+    }
+  } catch(e) {
+    setFinnhubStatus('❌ 連線失敗：' + e.message, 'err');
+  }
+}
+function setFinnhubStatus(msg, type) {
+  const el = document.getElementById('finnhub-key-status');
+  el.textContent = msg; el.className = 'key-status ' + type;
+}
+function saveFinnhubKey() {
+  const key = document.getElementById('finnhub-key-input').value.trim();
+  if (!key) { setFinnhubStatus('請先輸入 API Key', 'err'); return; }
+  finnhubKey = key;
+  localStorage.setItem('finnhub_api_key', key);
+  updateKeyIndicator();
+  closeKeyPanel();
+  addLog('info', '✅ Finnhub Key 已儲存，下次抓取報價將優先使用 Finnhub');
+}
+
+function openKeyPanel() {
+  document.getElementById('key-input').value = geminiKey;
+  document.getElementById('key-status').textContent = geminiKey ? '已儲存 Key（點測試確認是否有效）' : '';
+  document.getElementById('key-status').className = 'key-status';
+  document.getElementById('key-panel').style.display = 'flex';
+}
+function closeKeyPanel() { document.getElementById('key-panel').style.display = 'none'; }
+
+async function testKey() {
+  const key = document.getElementById('key-input').value.trim();
+  if (!key) { setKeyStatus('請先輸入 API Key', 'err'); return; }
+  setKeyStatus('測試連線中…', 'testing');
+  try {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({contents:[{parts:[{text:'回答「OK」兩個字'}]}]})
+    });
+    const d = await r.json();
+    if (d.candidates?.[0]?.content?.parts?.[0]?.text) {
+      setKeyStatus('✅ 連線成功！Gemini API Key 有效', 'ok');
+    } else if (d.error) {
+      setKeyStatus('❌ 錯誤：' + (d.error.message||'Key 無效'), 'err');
+    } else {
+      setKeyStatus('⚠ 回應異常，請再試一次', 'err');
+    }
+  } catch(e) {
+    setKeyStatus('❌ 連線失敗：' + e.message, 'err');
+  }
+}
+function setKeyStatus(msg, type) {
+  const el = document.getElementById('key-status');
+  el.textContent = msg; el.className = 'key-status ' + type;
+}
+function saveKey() {
+  const key = document.getElementById('key-input').value.trim();
+  if (!key) { setKeyStatus('請先輸入 API Key', 'err'); return; }
+  geminiKey = key;
+  localStorage.setItem('gemini_api_key', key);
+  updateKeyIndicator();
+  closeKeyPanel();
+}
+function updateKeyIndicator() {
+  const dot   = document.getElementById('gemini-dot');
+  const label = document.getElementById('gemini-key-label');
+  const hasFinnhub = !!finnhubKey;
+  const hasGemini  = !!geminiKey;
+  if (hasGemini && hasFinnhub) {
+    dot.style.background = '#00e676';
+    dot.style.boxShadow  = '0 0 5px #00e676';
+    label.textContent = 'AI+股價 ✓';
+  } else if (hasGemini) {
+    dot.style.background = '#00e676';
+    dot.style.boxShadow  = '0 0 5px #00e676';
+    label.textContent = 'Gemini AI ✓';
+  } else if (hasFinnhub) {
+    dot.style.background = '#00c9e8';
+    dot.style.boxShadow  = '0 0 5px #00c9e8';
+    label.textContent = 'Finnhub ✓';
+  } else {
+    dot.style.background = '#ffab00';
+    dot.style.boxShadow  = 'none';
+    label.textContent = 'API 未設定';
+  }
+}
+
+// ── AI 分析 Artifact 視窗（Gemini）────────────────────────
+async function runAI(code, name, sector) {
   const stock = [...holdStocks, ...watchStocks].find(s => s.code === code);
   const pd    = priceData[code];
   const sc    = calcScore(stock, pd);
@@ -957,10 +1268,62 @@ EPS（去年/今年累積）：${fin2.eps_ly??'—'} / ${fin2.eps_ytd??'—'}
   document.body.appendChild(overlay);
   setDot('dot-ai', 'ok');
 
-  // 模擬分析（本機測試用，部署後自動切換真實 API）
+  // ── 呼叫 Gemini API ──
+  const body = document.getElementById('ai-artifact-body');
+
+  if (!geminiKey) {
+    // 沒有 Key：顯示提示並用模擬分析
+    body.innerHTML = `<div style="background:rgba(255,171,0,.08);border:1px solid rgba(255,171,0,.2);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:#ffab00">
+      ⚠ 尚未設定 Gemini API Key。<br>
+      <span style="color:#7a9ab8">點右上角「AI 未設定」按鈕設定，即可使用真實 AI 分析。現在顯示模擬分析。</span>
+    </div>`;
+    setTimeout(() => { runMockAnalysis(code, stock, pd, sc, modeStr); }, 800);
+    return;
+  }
+
+  try {
+    const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
+    const r = await fetch(GEMINI_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        contents: [{parts: [{text: prompt}]}],
+        generationConfig: {maxOutputTokens: 1500, temperature: 0.7}
+      })
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error.message);
+    const txt = d.candidates?.[0]?.content?.parts?.[0]?.text || '分析失敗，請重試。';
+    const NL = String.fromCharCode(10);
+    const html = txt
+      .replace(/【([^】]+)】/g, '<div style="margin-top:16px;margin-bottom:6px;padding:6px 12px;background:rgba(0,201,232,.08);border-left:3px solid #00c9e8;border-radius:0 6px 6px 0;font-weight:600;color:#7ac8e8;font-size:13px">$1</div>')
+      .split(NL).join('<br>');
+    body.innerHTML = html +
+      `<div style="margin-top:14px;padding-top:10px;border-top:1px solid #1a2840;display:flex;gap:6px;flex-wrap:wrap">
+        ${(SIGS[code]||[]).map(s=>`<span style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid rgba(0,201,232,.2);color:#00c9e8;background:rgba(0,201,232,.06)">${s}</span>`).join('')}
+        <span style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid rgba(0,230,118,.2);color:#00e676;background:rgba(0,230,118,.06)">Gemini 2.0 Flash</span>
+        <span style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid rgba(255,171,0,.2);color:#ffab00;background:rgba(255,171,0,.06)">評分 ${sc.score}/100</span>
+      </div>`;
+    setDot('dot-ai', 'ok');
+  } catch(e) {
+    body.innerHTML = `<div style="color:#ff8a80;font-size:12px">⚠ Gemini API 錯誤：${e.message}</div>
+      <div style="color:#3d5570;font-size:11px;margin-top:8px">
+        請點右上角「Gemini AI ✓」重新測試 Key 是否有效。<br>
+        改用模擬分析顯示中…
+      </div>`;
+    setTimeout(() => { runMockAnalysis(code, stock, pd, sc, modeStr); }, 1000);
+    setDot('dot-ai', 'warn');
+  }
+}
+
+// ── 模擬分析（Gemini 失敗時備用）────────────────────────
+function runMockAnalysis(code, stock, pd, sc, modeStr) {
+  const body = document.getElementById('ai-artifact-body');
+  if (!body) return;
+  // 保留模擬分析邏輯
   setTimeout(() => {
-    const body = document.getElementById('ai-artifact-body');
-    if (!body) return;
+    const body2 = document.getElementById('ai-artifact-body');
+    if (!body2) return;
 
     const fin2 = FINS[code] || {};
     const modeStr = currentMode === 'before' ? '盤前' : '盤後';
@@ -1050,7 +1413,7 @@ EPS（去年/今年累積）：${fin2.eps_ly??'—'} / ${fin2.eps_ytd??'—'}
 
       html += section('財務數據評估',
         `${fin2.eps_ly?`去年全年 EPS ${fin2.eps_ly} 元，今年累積 EPS ${fin2.eps_ytd>0?'+':''}${fin2.eps_ytd??'—'} 元。`:'ETF 不適用 EPS 評估。'}
-         ${fin2.gm?`毛利率 ${fin2.gm}%（${fin2.gm>=30?'優良':'普通'}），${fin2.rev_yoy?`最新月營收年增率 ${fin2.rev_yoy>0?'+':''}${fin2.rev_yoy}%，${fin2.rev_yoy>0?'營收動能正向，基本面支撐股價':'營收衰退，需觀察後續恢復情況'}。`:''}`:''}`);
+         ${fin2.gm?`毛利率 ${fin2.gm}%（${fin2.gm>=30?'優良':'普通'}），${fin2.rev_yoy?`最新月營收年增率 ${fin2.rev_yoy>0?'+':''}${fin2.rev_yoy}%，${fin2.rev_yoy>0?'營收動能正向':'營收衰退，需觀察後續'}。`:''}`:''} <span style='color:#3d5570;font-size:11px'>（以上財務數據為模擬示範，請以實際財報核對）</span>`);
     }
 
     html += section('明日操作策略',
@@ -1075,7 +1438,7 @@ EPS（去年/今年累積）：${fin2.eps_ly??'—'} / ${fin2.eps_ytd??'—'}
 
     body.innerHTML = html;
     setDot('dot-ai', 'ok');
-  }, 1800);  // 模擬1.8秒分析延遲
+  }, 400);
 }
 
 // ── 觀察股移入庫存股 ─────────────────────────────────────
