@@ -433,7 +433,22 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
 
 <script>
 // ── 庫存股（無成本/損益）────────────────────────────────
-let holdStocks = [
+// 從 localStorage 載入已儲存的個股清單（優先），否則用預設
+function loadStocksFromStorage() {
+  try {
+    const saved = localStorage.getItem('stocks_hold');
+    if (saved) return JSON.parse(saved);
+  } catch(e) {}
+  return null;
+}
+function saveStocksToStorage() {
+  try {
+    localStorage.setItem('stocks_hold',  JSON.stringify(holdStocks));
+    localStorage.setItem('stocks_watch', JSON.stringify(watchStocks));
+  } catch(e) {}
+}
+
+let holdStocks = loadStocksFromStorage() || [
   {code:'1303.TW',  name:'南亞',    type:'stock', sector:'塑化',   market:'tse'},
   {code:'6261.TWO', name:'久元',    type:'stock', sector:'半導體', market:'otc'},
   {code:'3260.TWO', name:'威剛',    type:'stock', sector:'記憶體', market:'otc'},
@@ -454,8 +469,14 @@ let watchStocks = [
   {code:'2465.TW', name:'麗臺',   type:'stock', sector:'GPU/AI',  market:'otc'},
   {code:'3526.TWO', name:'凡甲',   type:'stock', sector:'連接器',  market:'otc'},
   {code:'3004.TW',  name:'豐達科', type:'stock', sector:'電源',    market:'tse'},
-  {code:'3653.TW', name:'健策',   type:'stock', sector:'散熱',    market:'otc'},
+  {code:'3653.TW', name:'健策',   type:'stock', sector:'散熱',    market:'tse'},
 ];
+(function loadWatchFromStorage() {
+  try {
+    const saved = localStorage.getItem('stocks_watch');
+    if (saved) watchStocks = JSON.parse(saved);
+  } catch(e) {}
+})();
 
 // ── 模擬資料（API 失敗時備用）────────────────────────────
 const MOCK = {
@@ -752,7 +773,8 @@ async function fetchYahoo(code, idx=0) {
     const meta = j?.chart?.result?.[0]?.meta;
     if (!meta) throw new Error('no meta');
     const price=meta.regularMarketPrice??meta.previousClose;
-    const prev=meta.chartPreviousClose??meta.previousClose??price;
+    // 優先用 regularMarketPreviousClose（最準確），次選 chartPreviousClose
+    const prev=meta.regularMarketPreviousClose??meta.chartPreviousClose??meta.previousClose??price;
     const chg=+(price-prev).toFixed(2), pct=prev?+(chg/prev*100).toFixed(2):0;
     const closes=j.chart.result[0].indicators?.quote?.[0]?.close?.filter(Boolean)??[];
     if (closes.length>=2) SPARK[code]=closes.slice(-5).map(v=>+v.toFixed(2));
@@ -930,6 +952,340 @@ function sparkHTML(code) {
     <polyline points="${polyline}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
     <circle cx="${lx}" cy="${ly}" r="2.5" fill="${color}"/>
   </svg>`;
+}
+
+// ══════════════════════════════════════════════════════════
+// 技術指標計算引擎
+// 使用 TWSE API 抓近3個月日線資料，計算真實指標數值
+// ══════════════════════════════════════════════════════════
+let techCache = {};  // 快取技術指標資料 {code: {macd,kd,rsi,bb,closes,dates}}
+
+// 取得近N個月份字串 [202504, 202503, 202502]
+function getRecentMonths(n=3) {
+  const months = [];
+  const d = new Date();
+  for (let i=0; i<n; i++) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    months.push(`${y}${m}01`);
+    d.setMonth(d.getMonth()-1);
+  }
+  return months;
+}
+
+// 抓 TWSE/TPEx 月線資料
+async function fetchMonthlyOHLCV(stockNo, isOTC, yyyymmdd) {
+  const base = isOTC
+    ? `https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock/result?date=${yyyymmdd}&stockCode=${stockNo}&response=json`
+    : `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymmdd}&stockNo=${stockNo}`;
+  const proxy = `https://corsproxy.io/?${encodeURIComponent(base)}`;
+  try {
+    const r = await fetch(proxy, {signal: AbortSignal.timeout(8000)});
+    if (!r.ok) return [];
+    const j = await r.json();
+    // TWSE 格式
+    if (j.data) {
+      return j.data.map(row => ({
+        date:  row[0],
+        open:  parseFloat(row[3].replace(/,/g,'')),
+        high:  parseFloat(row[4].replace(/,/g,'')),
+        low:   parseFloat(row[5].replace(/,/g,'')),
+        close: parseFloat(row[6].replace(/,/g,'')),
+        vol:   Math.round(parseFloat(row[1].replace(/,/g,''))/1000),
+      })).filter(d => !isNaN(d.close));
+    }
+    return [];
+  } catch(e) { return []; }
+}
+
+// 計算 EMA
+function ema(data, period) {
+  const k = 2/(period+1);
+  const result = [data[0]];
+  for (let i=1; i<data.length; i++) {
+    result.push(data[i]*k + result[i-1]*(1-k));
+  }
+  return result;
+}
+
+// 計算 MACD (12,26,9)
+function calcMACD(closes) {
+  if (closes.length < 26) return null;
+  const ema12 = ema(closes, 12);
+  const ema26 = ema(closes, 26);
+  const dif   = ema12.map((v,i) => +(v - ema26[i]).toFixed(2));
+  const dem   = ema(dif.slice(25), 9);  // DEA從第26天開始
+  const macd  = dem.map((v,i) => +((dif[i+25] - v)*2).toFixed(2));
+  const last  = closes.length-1;
+  const difLast = dif[last];
+  const deaLast = dem[dem.length-1];
+  return {
+    dif: +difLast.toFixed(3),
+    dea: +deaLast.toFixed(3),
+    bar: +((difLast-deaLast)*2).toFixed(3),
+    trend: difLast > deaLast ? 'up' : 'dn',
+    cross: macd.length>=2 ? (macd[macd.length-1]>0 && macd[macd.length-2]<=0 ? '黃金交叉' : macd[macd.length-1]<0 && macd[macd.length-2]>=0 ? '死亡交叉' : '') : '',
+  };
+}
+
+// 計算 KD (RSV 9日, K 3平滑, D 3平滑)
+function calcKD(highs, lows, closes, period=9) {
+  if (closes.length < period) return null;
+  let k=50, d=50;
+  const kArr=[], dArr=[];
+  for (let i=period-1; i<closes.length; i++) {
+    const h = Math.max(...highs.slice(i-period+1, i+1));
+    const l = Math.min(...lows.slice(i-period+1, i+1));
+    const rsv = h===l ? 50 : (closes[i]-l)/(h-l)*100;
+    k = k*2/3 + rsv/3;
+    d = d*2/3 + k/3;
+    kArr.push(+k.toFixed(2));
+    dArr.push(+d.toFixed(2));
+  }
+  const kVal = kArr[kArr.length-1], dVal = dArr[dArr.length-1];
+  const cross = kArr.length>=2 ? (kVal>dVal && kArr[kArr.length-2]<=dArr[dArr.length-2] ? '黃金交叉' : kVal<dVal && kArr[kArr.length-2]>=dArr[dArr.length-2] ? '死亡交叉' : '') : '';
+  return {
+    k: kVal, d: dVal,
+    zone: kVal>=80?'超買區':kVal<=20?'超賣區':kVal>=60?'偏強':'偏弱',
+    trend: kVal>dVal?'K>D多方':'K<D空方',
+    cross,
+  };
+}
+
+// 計算 RSI (14日)
+function calcRSI(closes, period=14) {
+  if (closes.length < period+1) return null;
+  const changes = closes.slice(1).map((v,i) => v-closes[i]);
+  let gains=0, losses=0;
+  for (let i=0; i<period; i++) {
+    if (changes[i]>0) gains+=changes[i]; else losses-=changes[i];
+  }
+  let avgG=gains/period, avgL=losses/period;
+  for (let i=period; i<changes.length; i++) {
+    avgG = (avgG*(period-1)+(changes[i]>0?changes[i]:0))/period;
+    avgL = (avgL*(period-1)+(changes[i]<0?-changes[i]:0))/period;
+  }
+  const rs = avgL===0 ? 100 : avgG/avgL;
+  const rsi = +(100-100/(1+rs)).toFixed(2);
+  return {
+    value: rsi,
+    zone: rsi>=80?'強力超買':rsi>=70?'超買':rsi<=20?'強力超賣':rsi<=30?'超賣':rsi>=50?'偏強':'偏弱',
+    signal: rsi>=70?'注意回調':rsi<=30?'留意反彈':'中性',
+  };
+}
+
+// 計算布林通道 (20日, 2σ)
+function calcBB(closes, period=20, mult=2) {
+  if (closes.length < period) return null;
+  const slice = closes.slice(-period);
+  const mid = slice.reduce((a,b)=>a+b,0)/period;
+  const variance = slice.reduce((s,v)=>s+(v-mid)**2,0)/period;
+  const std = Math.sqrt(variance);
+  const upper = +(mid+mult*std).toFixed(2);
+  const lower = +(mid-mult*std).toFixed(2);
+  const midR  = +mid.toFixed(2);
+  const last  = closes[closes.length-1];
+  const bw    = +((upper-lower)/midR*100).toFixed(1); // 帶寬%
+  const pb    = +((last-lower)/(upper-lower)*100).toFixed(1); // %B位置
+  return {
+    upper, mid: midR, lower, bw,
+    pb, // 0=下軌,100=上軌,50=中軌
+    pos: pb>=90?'接近上軌':pb<=10?'接近下軌':pb>=60?'中軌上方':pb<=40?'中軌下方':'中軌附近',
+    squeeze: bw<3?'帶寬收縮（蓄勢）':'帶寬正常',
+  };
+}
+
+// 主要入口：抓資料+計算所有指標
+async function fetchTechIndicators(code) {
+  if (techCache[code]) return techCache[code]; // 命中快取
+
+  const no    = code.replace('.TWO','').replace('.TW','');
+  const isOTC = code.endsWith('.TWO');
+  const months = getRecentMonths(3);
+
+  // 並行抓3個月資料
+  const results = await Promise.all(months.map(m => fetchMonthlyOHLCV(no, isOTC, m)));
+  const all = results.flat().sort((a,b) => a.date.localeCompare(b.date));
+
+  if (all.length < 20) return null;  // 資料不足
+
+  const closes = all.map(d=>d.close);
+  const highs  = all.map(d=>d.high);
+  const lows   = all.map(d=>d.low);
+  const vols   = all.map(d=>d.vol);
+  const dates  = all.map(d=>d.date);
+
+  const indicators = {
+    macd: calcMACD(closes),
+    kd:   calcKD(highs, lows, closes),
+    rsi:  calcRSI(closes),
+    bb:   calcBB(closes),
+    closes: closes.slice(-20),
+    dates:  dates.slice(-20),
+    vols:   vols.slice(-20),
+    lastClose: closes[closes.length-1],
+  };
+
+  techCache[code] = indicators;
+  return indicators;
+}
+
+// ── 點擊技術訊號：彈出指標詳細視窗 ──────────────────────
+async function showTechDetail(code, name) {
+  // 建立 loading 視窗
+  const overlay = document.createElement('div');
+  overlay.id = 'tech-detail-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:600;display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.onclick = e => { if(e.target===overlay) overlay.remove(); };
+  overlay.innerHTML = `
+  <div style="background:#0d1624;border:1px solid #243554;border-radius:16px;width:100%;max-width:700px;max-height:88vh;overflow-y:auto">
+    <div style="padding:16px 20px;border-bottom:1px solid #1a2840;display:flex;align-items:center;gap:10px">
+      <div style="font-size:16px;font-weight:700;color:#dde6f0;font-family:'JetBrains Mono',monospace">${code.replace('.TWO','').replace('.TW','')} ${name} — 技術指標詳情</div>
+      <button onclick="document.getElementById('tech-detail-overlay').remove()" style="margin-left:auto;background:rgba(61,85,112,.2);border:1px solid #3d5570;color:#8ba4c0;font-size:14px;cursor:pointer;padding:3px 12px;border-radius:5px">✕ 關閉</button>
+    </div>
+    <div id="tech-detail-body" style="padding:20px">
+      <div style="display:flex;align-items:center;gap:8px;color:#3d5570;font-size:13px">
+        <div style="width:6px;height:6px;border-radius:50%;background:#00c9e8;animation:blink 1s infinite"></div>
+        正在從 TWSE 抓取近3個月日線資料，計算技術指標…
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+
+  const ind = await fetchTechIndicators(code);
+  const body = document.getElementById('tech-detail-body');
+  if (!body) return;
+
+  if (!ind) {
+    body.innerHTML = '<div style="color:#ff8a80">⚠ 無法取得足夠歷史資料，請稍後再試</div>';
+    return;
+  }
+
+  const {macd, kd, rsi, bb, closes, dates, vols} = ind;
+
+  // 顏色輔助
+  const c = (val, up='#00e676', dn='#ff4f4f', neu='#7a9ab8') =>
+    val > 0 ? up : val < 0 ? dn : neu;
+  const zc = zone => zone.includes('超買')||zone.includes('偏強')?'#00e676':zone.includes('超賣')||zone.includes('偏弱')?'#ff4f4f':'#7a9ab8';
+
+  // 迷你折線圖 SVG（收盤價近20日）
+  const mn=Math.min(...closes), mx=Math.max(...closes), r=mx-mn||1;
+  const W=280, H=50, pd2=4;
+  const pts = closes.map((v,i)=>{
+    const x = pd2 + i/(closes.length-1)*(W-pd2*2);
+    const y = H - pd2 - (v-mn)/r*(H-pd2*2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const lineColor = closes[closes.length-1]>=closes[0]?'#00e676':'#ff4f4f';
+  const miniChart = `<svg width="${W}" height="${H}" style="display:block">
+    <polyline points="${pts}" fill="none" stroke="${lineColor}" stroke-width="1.5" stroke-linejoin="round"/>
+    <circle cx="${(pd2+(closes.length-1)/(closes.length-1)*(W-pd2*2)).toFixed(1)}" cy="${(H-pd2-(closes[closes.length-1]-mn)/r*(H-pd2*2)).toFixed(1)}" r="3" fill="${lineColor}"/>
+  </svg>`;
+
+  const card = (title, color, content) => `
+    <div style="background:#111827;border:1px solid #1a2840;border-radius:10px;padding:14px 16px;border-top:3px solid ${color}">
+      <div style="font-size:12px;font-weight:600;color:${color};margin-bottom:10px;letter-spacing:.05em">${title}</div>
+      ${content}
+    </div>`;
+
+  const row = (label, value, valueColor='#dde6f0', note='') => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(26,40,64,.5)">
+      <span style="font-size:12px;color:#7a9ab8">${label}</span>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;color:${valueColor}">${value}${note?`<span style="font-size:10px;color:#3d5570;margin-left:5px">${note}</span>`:''}</span>
+    </div>`;
+
+  body.innerHTML = `
+    <!-- 近20日走勢 -->
+    <div style="background:#111827;border:1px solid #1a2840;border-radius:10px;padding:14px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:16px">
+      <div>
+        <div style="font-size:11px;color:#3d5570;margin-bottom:4px">近20日收盤走勢　最新：${closes[closes.length-1]} 元</div>
+        <div style="font-size:10px;color:#3d5570">${dates[0]} ～ ${dates[dates.length-1]}</div>
+      </div>
+      ${miniChart}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:0">
+
+    <!-- MACD -->
+    ${macd ? card('📊 MACD（12,26,9）', '#00c9e8', `
+      ${row('DIF（快線）', macd.dif, c(macd.dif))}
+      ${row('DEA（慢線）', macd.dea, c(macd.dea))}
+      ${row('MACD柱狀', macd.bar, c(macd.bar))}
+      ${row('趨勢', macd.dif>macd.dea?'多頭排列':'空頭排列', macd.dif>macd.dea?'#00e676':'#ff4f4f')}
+      ${macd.cross?row('交叉訊號', macd.cross, macd.cross.includes('黃金')?'#00e676':'#ff4f4f'):''}
+      <div style="margin-top:8px;font-size:10px;color:#3d5570;line-height:1.6">
+        DIF>DEA且柱狀為正→多方強勢<br>DIF<DEA且柱狀為負→空方主導
+      </div>
+    `) : card('📊 MACD', '#00c9e8', '<div style="color:#3d5570;font-size:12px">資料不足</div>')}
+
+    <!-- KD -->
+    ${kd ? card('📈 KD 隨機指標（9,3,3）', '#ffab00', `
+      ${row('K 值', kd.k, kd.k>=80?'#ff4f4f':kd.k<=20?'#00e676':'#dde6f0')}
+      ${row('D 值', kd.d, kd.d>=80?'#ff4f4f':kd.d<=20?'#00e676':'#dde6f0')}
+      ${row('位置', kd.zone, zc(kd.zone))}
+      ${row('趨勢', kd.trend, kd.k>kd.d?'#00e676':'#ff4f4f')}
+      ${kd.cross?row('交叉', kd.cross, kd.cross.includes('黃金')?'#00e676':'#ff4f4f'):''}
+      <div style="margin-top:8px;font-size:10px;color:#3d5570;line-height:1.6">
+        K>80超買留意回調；K<20超賣留意反彈<br>K向上穿越D→黃金交叉買訊
+      </div>
+    `) : card('📈 KD', '#ffab00', '<div style="color:#3d5570;font-size:12px">資料不足</div>')}
+
+    <!-- RSI -->
+    ${rsi ? card('🔴 RSI 相對強弱（14日）', '#ff6b9d', `
+      ${row('RSI 值', rsi.value, rsi.value>=70?'#ff4f4f':rsi.value<=30?'#00e676':'#dde6f0')}
+      ${row('強弱區間', rsi.zone, zc(rsi.zone))}
+      ${row('操作提示', rsi.signal, rsi.signal==='注意回調'?'#ff4f4f':rsi.signal==='留意反彈'?'#00e676':'#7a9ab8')}
+      <div style="margin-top:8px;padding:6px 8px;background:rgba(255,107,157,.06);border-radius:6px">
+        <div style="font-size:11px;color:#7a9ab8;line-height:1.6">
+          RSI>70 超買（${rsi.value>=70?'⚠ 目前在此區間':'未達'} ）<br>
+          RSI<30 超賣（${rsi.value<=30?'⚠ 目前在此區間':'未達'}）<br>
+          RSI=50 多空分界線
+        </div>
+      </div>
+    `) : card('🔴 RSI', '#ff6b9d', '<div style="color:#3d5570;font-size:12px">資料不足</div>')}
+
+    <!-- 布林通道 -->
+    ${bb ? card('📉 布林通道（20日, 2σ）', '#a78bfa', `
+      ${row('上軌 Upper', bb.upper, '#ff8a80')}
+      ${row('中軌 Middle', bb.mid,   '#7a9ab8')}
+      ${row('下軌 Lower', bb.lower, '#69f0ae')}
+      ${row('%B 位置', bb.pb+'%', bb.pb>=90?'#ff4f4f':bb.pb<=10?'#00e676':'#dde6f0', '(0%=下軌,100%=上軌)')}
+      ${row('帶寬', bb.bw+'%', '#dde6f0')}
+      ${row('位置判斷', bb.pos, bb.pos.includes('上軌')?'#ff4f4f':bb.pos.includes('下軌')?'#00e676':'#7a9ab8')}
+      ${row('帶寬狀態', bb.squeeze, bb.squeeze.includes('收縮')?'#ffab00':'#7a9ab8')}
+      <div style="margin-top:8px;font-size:10px;color:#3d5570;line-height:1.6">
+        帶寬收縮後常有大波動；%B>100突破上軌為強勢
+      </div>
+    `) : card('📉 布林通道', '#a78bfa', '<div style="color:#3d5570;font-size:12px">資料不足</div>')}
+
+    </div>
+
+    <div style="margin-top:12px;padding:10px 14px;background:rgba(0,0,0,.3);border-radius:8px;font-size:10px;color:#3d5570;line-height:1.7">
+      ⚠ 資料來源：TWSE/TPEx 歷史日線（近3個月）。技術指標為數學計算，僅供參考，不構成投資建議。
+    </div>`;
+}
+
+// 顯示所有技術訊號（用於詳情視窗）
+// 點 MACD/KD/RSI/布林 標籤會彈出詳細指標視窗
+function pillsAllHTML(code) {
+  const stock = [...holdStocks,...watchStocks].find(s=>s.code===code);
+  const name  = stock?.name || '';
+  const bull = ['突破','翻多','利多','拉升','受惠','連動','多頭','增','上緣','>60','>65','>68','>70','>75','佳','強勢','金叉','強多'];
+  const bear = ['跌破','死叉','量縮','下穿','下緣','<30','<35','<40','超賣'];
+  const warn = ['超買','波動','槓桿','>70','>75','上緣','注意','高檔'];
+  // 技術指標標籤（可點擊展開）
+  const techTags = ['MACD','KD','RSI','布林'];
+  return (SIGS[code] || []).map(s => {
+    const isTech = techTags.some(t=>s.includes(t));
+    const c = bear.some(k=>s.includes(k))?'bear':warn.some(k=>s.includes(k))?'warn':bull.some(k=>s.includes(k))?'bull':'neu';
+    if (isTech) {
+      // 可點擊的技術指標標籤
+      return `<span class="sp ${c}" style="font-size:11px;padding:3px 9px;cursor:pointer;border-bottom:1.5px dashed currentColor" 
+        onclick="showTechDetail('${code}','${name}')" title="點擊查看${s}詳細數值">
+        ${s} 📊</span>`;
+    }
+    return `<span class="sp ${c}" style="font-size:11px;padding:3px 9px">${s}</span>`;
+  }).join('');
 }
 
 function pillsHTML(code) {
@@ -1133,17 +1489,34 @@ function showDetail(code) {
   const src   = priceSource[code];
 
   const typeLabel = stock?.type==='etf' ? 'ETF' : stock?.type==='lev' ? '槓桿ETF' : '股票';
-  const srcLabel  = src==='live'
-    ? '<span class="src-live">Yahoo Finance</span>'
-    : '<span class="src-mock">模擬資料</span>';
+  const _src = priceData[code]?.src;
+  const srcLabel = _src==='twse-mis' ? '<span class="src-live" style="color:#ffd54f">TWSE即時</span>'
+                 : _src==='twse'     ? '<span class="src-live" style="color:#ffd54f">TWSE收盤</span>'
+                 : _src==='yahoo'    ? '<span class="src-live">Yahoo</span>'
+                 : _src==='finnhub'  ? '<span class="src-live" style="color:#00e676">Finnhub</span>'
+                 : '<span class="src-mock">模擬資料</span>';
+
+  // 昨收：直接從 priceData 取，TWSE MIS 的 y 欄位是最準確的
+  const prevClose = pd?.prev ?? null;
+  const prevSrc   = (() => {
+    const s = priceData[code]?.src;
+    if (s==='twse-mis') return 'TWSE即時';
+    if (s==='twse')     return 'TWSE收盤';
+    if (s==='yahoo')    return 'Yahoo';
+    return 'MOCK';
+  })();
+
+  const fin = FINS[code] || {};
 
   const mets = [
+    {l:'昨日收盤價', v: prevClose ? fmt(prevClose,2) : '—', c:'neu'},
     {l:'今日最高價', v: pd ? fmt(pd.high, 2) : '—', c:'up'},
     {l:'今日最低價', v: pd ? fmt(pd.low,  2) : '—', c:'dn'},
-    {l:'成交量（張）',v: pd ? fmt(pd.vol,  0)       : '—', c:'neu'},
-    {l:'漲跌幅',     v: pd ? fmtP(pd.pct)          : '—', c: cls(pd?.pct)},
+    {l:'成交量（張）',v: pd ? fmt(pd.vol,  0) : '—', c:'neu'},
+    {l:'EPS（去年/今年）', v: fin.eps_ly!=null?`${fin.eps_ly} / ${fin.eps_ytd??'—'}`:'—', c:'neu'},
+    {l:'毛利率',     v: fin.gm!=null?fin.gm+'%':'—', c:fin.gm>=30?'up':fin.gm>=20?'warn':'dn'},
+    {l:'營收YOY',    v: fin.rev_yoy!=null?(fin.rev_yoy>0?'+':'')+fin.rev_yoy+'%':'—', c:fin.rev_yoy>0?'up':'dn'},
     {l:'綜合評分',   v: sc.score+'/100', c: sc.score>=70?'up':sc.score>=50?'warn':'dn'},
-    {l:'產業別',     v: stock?.sector || '—', c:'neu'},
   ];
 
   const sigLabel = {buy:'建議買進', hold:'繼續持有', sell:'考慮賣出', neutral:'中性觀察'};
@@ -1177,8 +1550,8 @@ function showDetail(code) {
           </div>`).join('')}
       </div>
       <div style="margin-bottom:12px">
-        <div style="font-size:11px;color:var(--text3);margin-bottom:6px">技術訊號</div>
-        <div class="spills" style="justify-content:flex-start">${pillsHTML(code)}</div>
+        <div style="font-size:11px;color:var(--text2);font-weight:500;margin-bottom:6px">技術訊號</div>
+        <div class="spills" style="justify-content:flex-start">${pillsAllHTML(code)}</div>
       </div>
       <div class="ai-box">
         <div class="ai-hdr">
@@ -1573,6 +1946,7 @@ function moveToHold(code) {
   watchStocks = watchStocks.filter(x => x.code !== code);
   document.getElementById('tc-hold').textContent  = holdStocks.length;
   document.getElementById('tc-watch').textContent = watchStocks.length;
+  saveStocksToStorage();
   closeDetail();
   switchTab('hold');
 }
@@ -1661,21 +2035,26 @@ function addStock() {
   document.getElementById('mgr-name-input').value = '';
   document.getElementById('tc-hold').textContent  = holdStocks.length;
   document.getElementById('tc-watch').textContent = watchStocks.length;
+  saveStocksToStorage();
   renderMgrList();
   buildFilters();
   renderTable();
+  addLog('ok', `✅ 新增 ${name}（${code}），已永久儲存`);
 }
 function deleteStock(idx) {
   const list = mgrCurrentTab === 'hold' ? holdStocks : watchStocks;
   const s = list[idx];
   if (!confirm(`確定刪除 ${s.code.replace('.TWO','').replace('.TW','')} ${s.name}？`)) return;
+  const delName = list[idx]?.name || '';
   if (mgrCurrentTab === 'hold') holdStocks.splice(idx, 1);
   else watchStocks.splice(idx, 1);
   document.getElementById('tc-hold').textContent  = holdStocks.length;
   document.getElementById('tc-watch').textContent = watchStocks.length;
+  saveStocksToStorage();
   renderMgrList();
   buildFilters();
   renderTable();
+  addLog('ok', `🗑 已刪除 ${delName}，清單已永久更新`);
 }
 
 // ── 時鐘 ──────────────────────────────────────────────────
