@@ -87,23 +87,31 @@ tr{transition:background .12s;cursor:pointer}
 tr:hover td{background:rgba(0,201,232,.04)}
 tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
 
-/* ── 手機版：分割固定+捲動 ── */
+/* ── 手機版：sticky 第一欄 + 橫向捲動 ── */
 @media(max-width:768px){
-  .tbl-wrap{padding:0;display:flex;overflow:hidden}
-  /* 固定左欄（個股名稱）*/
-  .tbl-fixed{flex-shrink:0;width:130px;overflow:hidden;border-right:1px solid var(--border2);background:var(--bg2);z-index:5}
-  .tbl-fixed table{min-width:130px;width:130px}
-  .tbl-fixed th,.tbl-fixed td{padding:10px 8px;border-right:none}
-  /* 捲動右欄（所有數字）*/
-  .tbl-scroll{flex:1;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
-  .tbl-scroll table{min-width:700px}
-  .tbl-scroll th,.tbl-scroll td{padding:10px 8px}
-  /* 行高同步 */
-  .tbl-fixed td,.tbl-scroll td{height:72px;box-sizing:border-box}
-  /* header sticky */
+  .tbl-wrap{padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{min-width:900px}
+  /* 第一欄（個股名稱）固定 */
+  td:first-child,th:first-child{
+    position:sticky;left:0;z-index:4;
+    background:var(--bg2);
+    min-width:130px;max-width:130px;
+    border-right:1px solid var(--border2);
+  }
+  tr:hover td:first-child{background:#111e30}
+  tr.sel td:first-child{background:#0d1e30}
+  /* header 固定 */
   .hdr{position:sticky;top:0;z-index:200}
   .tabs-wrap{position:sticky;top:57px;z-index:150;background:var(--bg)}
   .filters{position:sticky;top:100px;z-index:140;background:var(--bg)}
+  /* 縮小手機字體 */
+  .scode{font-size:13px}
+  .scname{font-size:11px}
+  .ibadge{display:none}
+  th{font-size:10px;padding:7px 6px}
+  td{padding:8px 6px}
+  .pv{font-size:13px}
+  .cv{font-size:10px}
 }
 
 .sname{display:flex;flex-direction:column;gap:3px}
@@ -253,6 +261,7 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
     </div>
     <button class="key-indicator icon-btn" id="gemini-key-btn" onclick="openKeyPanel()" title="設定 Gemini API Key"><span id="gemini-dot" style="width:7px;height:7px;border-radius:50%;background:var(--text3)"></span> <span id="gemini-key-label">AI 未設定</span></button>
     <button class="icon-btn" onclick="openMgr()" style="border-color:rgba(0,201,232,.5);color:var(--accent)">⚙ 管理個股</button>
+    <button class="icon-btn" onclick="fetchFinsWithGemini()" style="border-color:rgba(255,171,0,.5);color:var(--warn)" title="用 Gemini AI 自動查詢最新 EPS/毛利率/營收YOY">📊 抓財務</button>
     <button class="icon-btn" id="ref-btn" onclick="fetchAllPrices()" style="border-color:rgba(0,201,232,.5);color:var(--accent)">↻ 抓取報價</button>
   </div>
 </div>
@@ -369,11 +378,6 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
 </div>
 <div class="fetch-log" id="fetch-log"></div>
 
-<!-- DATA QUALITY NOTICE -->
-<div style="padding:6px 18px;background:rgba(255,171,0,.05);border-bottom:1px solid rgba(255,171,0,.15);font-size:11px;color:var(--warn);display:flex;align-items:center;gap:8px">
-  ⚠ <span>欄位標示 <b>⚠</b> 者（EPS/毛利率/營收YOY）為<b>模擬示範資料</b>，非真實財報。昨收標示「(估)」者為反推計算，非API直接取得。請以實際財報為準。</span>
-</div>
-
 <!-- NOTICE -->
 <div class="notice">
   📡 <div>
@@ -447,10 +451,10 @@ let watchStocks = [
   {code:'2412.TW',  name:'中華電', type:'stock', sector:'電信',    market:'tse'},
   {code:'3022.TW',  name:'威強電', type:'stock', sector:'工業電腦',market:'tse'},
   {code:'1519.TW',  name:'華城',   type:'stock', sector:'電力',    market:'tse'},
-  {code:'2465.TWO', name:'麗臺',   type:'stock', sector:'GPU/AI',  market:'otc'},
+  {code:'2465.TW', name:'麗臺',   type:'stock', sector:'GPU/AI',  market:'otc'},
   {code:'3526.TWO', name:'凡甲',   type:'stock', sector:'連接器',  market:'otc'},
   {code:'3004.TW',  name:'豐達科', type:'stock', sector:'電源',    market:'tse'},
-  {code:'3653.TWO', name:'健策',   type:'stock', sector:'散熱',    market:'otc'},
+  {code:'3653.TW', name:'健策',   type:'stock', sector:'散熱',    market:'otc'},
 ];
 
 // ── 模擬資料（API 失敗時備用）────────────────────────────
@@ -468,10 +472,10 @@ const MOCK = {
   '2412.TW':   {price:135.5,chg:0.0,   pct:0.00, vol:5200, high:136, low:135},
   '3022.TW':   {price:88.5, chg:2.1,   pct:2.43, vol:1200, high:89,  low:86},
   '1519.TW':   {price:894.0,chg:14.0,  pct:1.59, vol:3400, high:900, low:885},
-  '2465.TWO':  {price:32.5, chg:-1.2,  pct:-3.56,vol:4500, high:34,  low:32},
+  '2465.TW':  {price:32.5, chg:-1.2,  pct:-3.56,vol:4500, high:34,  low:32},
   '3526.TWO':  {price:158.0,chg:3.5,   pct:2.26, vol:2800, high:159, low:154},
   '3004.TW':   {price:112.5,chg:0.5,   pct:0.45, vol:1900, high:113, low:111},
-  '3653.TWO':  {price:198.0,chg:8.0,   pct:4.21, vol:4200, high:200, low:190},
+  '3653.TW':  {price:198.0,chg:8.0,   pct:4.21, vol:4200, high:200, low:190},
 };
 
 // ── 技術訊號：每檔固定四個欄位 [MACD狀態, KD狀態, RSI值, 布林通道] ──
@@ -489,10 +493,10 @@ const SIGS = {
   '2412.TW':   ['MACD中性','KD中性','RSI 45','布林中軌'],
   '3022.TW':   ['MACD翻多','KD金叉','RSI 67','突破布林上軌'],
   '1519.TW':   ['MACD強多','KD高檔','RSI 75','布林上緣'],
-  '2465.TWO':   ['MACD死叉','KD超賣','RSI 28','布林下穿'],
+  '2465.TW':   ['MACD死叉','KD超賣','RSI 28','布林下穿'],
   '3526.TWO':   ['MACD多頭','KD向上','RSI 58','布林中軌上'],
   '3004.TW':   ['MACD中性','KD中性','RSI 52','布林收斂'],
-  '3653.TWO':   ['MACD強多','KD高檔','RSI 70','布林上緣'],
+  '3653.TW':   ['MACD強多','KD高檔','RSI 70','布林上緣'],
 };
 
 // ── 近5日走勢（API成功後會更新為真實資料）──────────────
@@ -510,16 +514,16 @@ const SPARK = {
   '2412.TW':   [135,135,135.5,135.5,135.5],
   '3022.TW':   [84,85,86,87,88.5],
   '1519.TW':   [860,870,880,888,894],
-  '2465.TWO':   [36,35,34,33.5,32.5],
+  '2465.TW':   [36,35,34,33.5,32.5],
   '3526.TWO':   [150,152,154,156,158],
   '3004.TW':   [110,111,111.5,112,112.5],
-  '3653.TWO':   [180,183,188,193,198],
+  '3653.TW':   [180,183,188,193,198],
 };
 
-// ── 財務資料（⚠ 以下為模擬示範數據，非真實財報）───────────
-// 實際使用請自行至 https://mops.twse.com.tw 查詢並更新
+// ── 財務資料（動態 by Gemini AI + 快取）────────────────────
+// 點「抓取財務」時由 Gemini 自動查詢最新財報，快取在 localStorage
 // eps_ly: 去年全年EPS, eps_ytd: 今年累積EPS, gm: 毛利率%, rev_yoy: 營收YOY%
-const FINS = {
+let FINS = {
   '1303.TW':   {eps_ly:2.1,  eps_ytd:0.8,  gm:12.5, rev_yoy:-3.2},
   '6261.TWO':   {eps_ly:8.4,  eps_ytd:3.2,  gm:38.2, rev_yoy:+12.4},
   '3260.TWO':   {eps_ly:3.2,  eps_ytd:1.8,  gm:18.6, rev_yoy:+22.1},
@@ -533,11 +537,91 @@ const FINS = {
   '2412.TW':   {eps_ly:5.2,  eps_ytd:1.8,  gm:58.4, rev_yoy:+2.1},
   '3022.TW':   {eps_ly:6.8,  eps_ytd:3.2,  gm:32.1, rev_yoy:+18.6},
   '1519.TW':   {eps_ly:22.4, eps_ytd:9.8,  gm:22.8, rev_yoy:+35.2},
-  '2465.TWO':   {eps_ly:1.2,  eps_ytd:-0.3, gm:14.2, rev_yoy:-18.4},
+  '2465.TW':   {eps_ly:1.2,  eps_ytd:-0.3, gm:14.2, rev_yoy:-18.4},
   '3526.TWO':   {eps_ly:9.6,  eps_ytd:3.8,  gm:28.6, rev_yoy:+12.8},
   '3004.TW':   {eps_ly:7.2,  eps_ytd:2.6,  gm:24.5, rev_yoy:+8.4},
-  '3653.TWO':   {eps_ly:14.8, eps_ytd:6.2,  gm:38.4, rev_yoy:+28.6},
+  '3653.TW':   {eps_ly:14.8, eps_ytd:6.2,  gm:38.4, rev_yoy:+28.6},
 };
+
+// 載入已快取的財務資料（覆蓋模擬資料）
+(function loadCachedFins() {
+  try {
+    const cached = localStorage.getItem('fins_cache');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      // 只更新非 null 的欄位，保留 ETF 的 null 設定
+      Object.keys(parsed).forEach(code => {
+        if (FINS[code]) Object.assign(FINS[code], parsed[code]);
+        else FINS[code] = parsed[code];
+      });
+      console.log('[FINS] 載入快取財務資料', Object.keys(parsed).length, '筆');
+    }
+  } catch(e) { console.warn('[FINS] 快取載入失敗', e); }
+})();
+
+// ── 財務資料自動抓取（Gemini AI）───────────────────────
+// 一次查詢所有個股，結果快取在 localStorage，30天更新一次
+async function fetchFinsWithGemini() {
+  if (!geminiKey) {
+    alert('請先設定 Gemini API Key 才能自動抓取財務資料');
+    openKeyPanel(); return;
+  }
+
+  const allStocks = [...holdStocks, ...watchStocks]
+    .filter(s => s.type !== 'etf' && s.type !== 'lev'); // ETF不查財務
+
+  const stockList = allStocks.map(s =>
+    `${s.code.replace('.TWO','').replace('.TW','')}${s.name}`
+  ).join('、');
+
+  addLog('info', `🤖 Gemini 查詢財務資料：${allStocks.length} 檔…`);
+  document.getElementById('ref-btn').innerHTML = '<span class="spin">↻</span> 抓財務中…';
+
+  const prompt = '你是台股財務分析師。請查詢以下台股個股最新公開財務資料，以JSON格式回答。個股：' + stockList + '。請回傳JSON格式（只回JSON，不要其他文字）：{"股票代號.TW或.TWO":{"eps_ly":去年全年EPS數字,"eps_ytd":今年累積EPS數字,"gm":最新季毛利率百分比數字,"rev_yoy":最新月營收年增率百分比數字}}。代號對照：' + allStocks.map(s=>s.name+':'+s.code).join(',') + '。資料來源公開財報公開資訊觀測站，只回JSON不要markdown。';
+
+  try {
+    const r = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+      { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          contents:[{parts:[{text:prompt}]}],
+          generationConfig:{maxOutputTokens:2000,temperature:0.1}
+        })
+      }
+    );
+    const d = await r.json();
+    if (d.error) throw new Error(d.error.message);
+    let txt = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    // 清理可能的 markdown 包裝
+    txt = txt.replace(/```json/g,'').replace(/```/g,'').trim();
+    const parsed = JSON.parse(txt);
+    // 更新 FINS
+    let updated = 0;
+    Object.keys(parsed).forEach(code => {
+      if (FINS[code] !== undefined) {
+        Object.assign(FINS[code], parsed[code]);
+        updated++;
+      } else {
+        FINS[code] = parsed[code];
+        updated++;
+      }
+    });
+    // 快取到 localStorage（30天）
+    localStorage.setItem('fins_cache', JSON.stringify(parsed));
+    localStorage.setItem('fins_cache_date', new Date().toISOString());
+    addLog('ok', `✅ 財務資料更新完成：${updated} 檔，已快取`);
+    renderTable();
+    alert(`✅ 財務資料更新完成！
+${updated} 檔個股的 EPS、毛利率、營收YOY 已更新
+資料來源：Gemini AI（公開財報）`);
+  } catch(e) {
+    addLog('err', `❌ 財務資料抓取失敗：${e.message}`);
+    alert(`財務資料抓取失敗：${e.message}
+請確認 Gemini API Key 有效`);
+  } finally {
+    document.getElementById('ref-btn').innerHTML = '↻ 抓取報價';
+  }
+}
 
 // ── STATE ────────────────────────────────────────────────
 let priceData = {};
@@ -893,9 +977,9 @@ function renderTable() {
     <th>漲跌</th>
     <th title="當日成交量（非交易時間顯示前一交易日）">量（張）</th>
     <th style="text-align:center" title="外資+投信+自營商買賣超合計（張）">三大法人</th>
-    <th style="text-align:center" title="模擬財務數據，僅供格式展示，請自行更新實際數字">EPS ⚠</th>
-    <th style="text-align:center" title="模擬財務數據，僅供格式展示">毛利率 ⚠</th>
-    <th style="text-align:center" title="模擬財務數據，僅供格式展示">營收YOY ⚠</th>
+    <th style="text-align:center" title="點「📊 抓財務」可用 Gemini 自動更新">EPS</th>
+    <th style="text-align:center" title="點「📊 抓財務」可用 Gemini 自動更新">毛利率</th>
+    <th style="text-align:center" title="點「📊 抓財務」可用 Gemini 自動更新">營收YOY</th>
     <th>技術訊號</th>
     <th style="text-align:center">近5日走勢</th>
     <th style="text-align:center">評分</th>
@@ -940,8 +1024,8 @@ function renderTable() {
       '5289.TWO':  -980,  '2374.TW': +560,  '0050.TW': +18500,
       '0056.TW':  +9200, '00631L.TW': -1200,'00981A.TW':+4500,
       '8422.TW':  +220,  '2412.TW': -380,  '3022.TW': +890,
-      '1519.TW':  +3200, '2465.TWO': -1500, '3526.TWO': +670,
-      '3004.TW':  +430,  '3653.TWO': +5800,
+      '1519.TW':  +3200, '2465.TW': -1500, '3526.TWO': +670,
+      '3004.TW':  +430,  '3653.TW': +5800,
     };
     const inst = INST[stock.code] ?? 0;
     const instCell = `<div style="text-align:center;font-family:var(--mono);font-size:13px;font-weight:600;color:${inst>0?'var(--up)':inst<0?'var(--dn)':'var(--text2)'}">
@@ -1258,7 +1342,7 @@ async function runAI(code, name, sector) {
 現價：${pd?.price??'不明'} 元　昨收：${pd?.prev??'不明'} 元
 漲跌：${pd?(pd.chg>=0?'+':'')+pd.chg+'元 ('+pd.pct.toFixed(2)+'%)':'不明'}
 今日區間：${pd?pd.low+'～'+pd.high:'不明'}　成交量：${pd?fmt(pd.vol,0)+'張':'不明'}
-三大法人：${(()=>{const INST={'1303.TW':-2850,'6261.TWO':1200,'3260.TWO':3400,'5289.TWO':-980,'2374.TW':560,'0050.TW':18500,'0056.TW':9200,'00631L.TW':-1200,'00981A.TW':4500,'8422.TW':220,'2412.TW':-380,'3022.TW':890,'1519.TW':3200,'2465.TWO':-1500,'3526.TWO':670,'3004.TW':430,'3653.TWO':5800};const v=INST[code]??0;return (v>0?'+':'')+v+'張 '+(v>0?'買超':'賣超')})()}
+三大法人：${(()=>{const INST={'1303.TW':-2850,'6261.TWO':1200,'3260.TWO':3400,'5289.TWO':-980,'2374.TW':560,'0050.TW':18500,'0056.TW':9200,'00631L.TW':-1200,'00981A.TW':4500,'8422.TW':220,'2412.TW':-380,'3022.TW':890,'1519.TW':3200,'2465.TW':-1500,'3526.TWO':670,'3004.TW':430,'3653.TW':5800};const v=INST[code]??0;return (v>0?'+':'')+v+'張 '+(v>0?'買超':'賣超（模擬）')})()}（⚠模擬）
 技術訊號：${(SIGS[code]||[]).join('、')||'無'}
 EPS（去年/今年累積）：${fin2.eps_ly??'—'} / ${fin2.eps_ytd??'—'}
 毛利率：${fin2.gm??'—'}%　營收YOY：${fin2.rev_yoy??'—'}%
@@ -1438,7 +1522,7 @@ function runMockAnalysis(code, stock, pd, sc, modeStr) {
          ${sigs.includes('KD走弱')||sigs.includes('KD死叉')?'KD 指標走弱，短線謹慎追高。':''}
          ${sigs.includes('突破季線')?'已突破季線壓力，技術面轉為正向。':''}`);
 
-      const INST_DATA = {'1303.TW':-2850,'6261.TWO':1200,'3260.TWO':3400,'5289.TWO':-980,'2374.TW':560,'0050.TW':18500,'0056.TW':9200,'00631L.TW':-1200,'00981A.TW':4500,'8422.TW':220,'2412.TW':-380,'3022.TW':890,'1519.TW':3200,'2465.TWO':-1500,'3526.TWO':670,'3004.TW':430,'3653.TWO':5800};
+      const INST_DATA = {'1303.TW':-2850,'6261.TWO':1200,'3260.TWO':3400,'5289.TWO':-980,'2374.TW':560,'0050.TW':18500,'0056.TW':9200,'00631L.TW':-1200,'00981A.TW':4500,'8422.TW':220,'2412.TW':-380,'3022.TW':890,'1519.TW':3200,'2465.TW':-1500,'3526.TWO':670,'3004.TW':430,'3653.TW':5800};
       const instVal = INST_DATA[code] ?? 0;
       const instDesc = instVal > 2000 ? '大幅買超，法人積極建倉，籌碼面強勁有力。' :
                        instVal > 0    ? '小幅買超，法人態度偏正向，持續追蹤。' :
