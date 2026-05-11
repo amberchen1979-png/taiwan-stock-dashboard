@@ -718,13 +718,20 @@ async function fetchTWSEClose(code) {
         const latest = arr[arr.length-1];
         // 欄位名稱可能是中文或英文
         const price = parseFloat(latest.ClosingPrice||latest['收盤價']||latest.close||0);
-        const prev  = arr.length>=2 ? parseFloat(arr[arr.length-2].ClosingPrice||arr[arr.length-2]['收盤價']||price) : price;
+        // 倒數第2筆是前一交易日收盤（真正的昨收）
+        const prev  = arr.length>=2 ? parseFloat(arr[arr.length-2].ClosingPrice||arr[arr.length-2]['收盤價']||0)||null : null;
         const high  = parseFloat(latest.HighestPrice||latest['最高價']||price);
         const low   = parseFloat(latest.LowestPrice||latest['最低價']||price);
         const vol   = Math.round(parseFloat(latest.TradeVolume||latest['成交股數']||latest.TradeValue||0)/1000);
         const chg   = +(price-prev).toFixed(2);
         const pct   = prev ? +(chg/prev*100).toFixed(2) : 0;
         if (!price||price===0) continue;
+        // 用真實收盤序列更新近5日走勢
+        if (arr.length >= 5) {
+          SPARK[code] = arr.slice(-5).map(r =>
+            parseFloat(r.ClosingPrice||r['收盤價']||0)
+          ).filter(v=>v>0);
+        }
         return {price, chg, pct, prev, vol, high, low, src:'twse'};
       } catch(e2) { continue; }
     }
@@ -738,6 +745,82 @@ function getTodayStr() {
 }
 
 // ── 方法C：Finnhub（美股用，台股免費版不支援）───────
+// ══════════════════════════════════════════════════════════
+// 三大法人真實資料（TWSE T86 + TPEx）
+// ══════════════════════════════════════════════════════════
+let instCache = {};
+
+function getTodayDateStr() {
+  const d = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
+  return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
+}
+
+async function fetchTWSEInst(dateStr) {
+  const url = 'https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date='+dateStr+'&selectType=ALLBUT0999';
+  const proxy = 'https://corsproxy.io/?'+encodeURIComponent(url);
+  try {
+    const r = await fetch(proxy, {signal: AbortSignal.timeout(12000)});
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    const j = await r.json();
+    if (j.stat !== 'OK' || !j.data) return {};
+    const result = {};
+    j.data.forEach(row => {
+      const no  = row[0]?.trim();
+      const f   = parseInt((row[4]||'0').replace(/,/g,''))||0;
+      const i   = parseInt((row[7]||'0').replace(/,/g,''))||0;
+      const d   = parseInt((row[10]||'0').replace(/,/g,''))||0;
+      const net = parseInt((row[11]||'0').replace(/,/g,''))||0;
+      if (no) result[no] = {f, i, d, net, src:'twse'};
+    });
+    addLog('ok', 'TWSE三大法人：'+Object.keys(result).length+' 筆');
+    return result;
+  } catch(e) { addLog('warn','TWSE三大法人失敗：'+e.message); return {}; }
+}
+
+async function fetchTPExInst(dateStr) {
+  const tpDate = dateStr.slice(0,4)+'/'+dateStr.slice(4,6)+'/'+dateStr.slice(6,8);
+  const url = 'https://www.tpex.org.tw/www/zh-tw/fund/ins_trading?date='+tpDate+'&response=json';
+  const proxy = 'https://corsproxy.io/?'+encodeURIComponent(url);
+  try {
+    const r = await fetch(proxy, {signal: AbortSignal.timeout(12000)});
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    const j = await r.json();
+    const rows = j.tables?.[0]?.data || j.aaData || [];
+    const result = {};
+    rows.forEach(row => {
+      const no = row[0]?.trim();
+      const clean = s => parseInt((s||'0').replace(/,/g,'').replace(/[+]/g,''))||0;
+      const f=clean(row[4]), i=clean(row[7]), d=clean(row[10]), net=clean(row[11]);
+      if (no) result[no] = {f, i, d, net, src:'tpex'};
+    });
+    addLog('ok', 'TPEx三大法人：'+Object.keys(result).length+' 筆');
+    return result;
+  } catch(e) { addLog('warn','TPEx三大法人失敗：'+e.message); return {}; }
+}
+
+async function fetchInstitutional() {
+  const today = getTodayDateStr();
+  if (instCache.date === today && Object.keys(instCache.data||{}).length > 0) return instCache.data;
+  addLog('info', '抓取三大法人（'+today+'）…');
+  const [twse, tpex] = await Promise.all([fetchTWSEInst(today), fetchTPExInst(today)]);
+  const merged = {...twse, ...tpex};
+  if (Object.keys(merged).length > 0) {
+    instCache = {date: today, data: merged};
+    try { localStorage.setItem('inst_cache', JSON.stringify(instCache)); } catch(e) {}
+  }
+  return merged;
+}
+
+function getInstData(code) {
+  const no = code.replace('.TWO','').replace('.TW','');
+  if (instCache.data?.[no]) return {...instCache.data[no], isLive:true};
+  try {
+    const saved = JSON.parse(localStorage.getItem('inst_cache')||'{}');
+    if (saved.data?.[no]) return {...saved.data[no], isLive:false, savedDate:saved.date};
+  } catch(e) {}
+  return null;
+}
+
 async function fetchFinnhub(code) {
   if (!finnhubKey) return null;
   try {
@@ -773,12 +856,14 @@ async function fetchYahoo(code, idx=0) {
     const meta = j?.chart?.result?.[0]?.meta;
     if (!meta) throw new Error('no meta');
     const price=meta.regularMarketPrice??meta.previousClose;
-    // 優先用 regularMarketPreviousClose（最準確），次選 chartPreviousClose
-    const prev=meta.regularMarketPreviousClose??meta.chartPreviousClose??meta.previousClose??price;
+    // 只用 regularMarketPreviousClose，這是唯一正確的昨收欄位
+    // 絕對不用 chartPreviousClose（它是K線圖第一筆前的值，不是昨收）
+    const prev=meta.regularMarketPreviousClose??null;
     const chg=+(price-prev).toFixed(2), pct=prev?+(chg/prev*100).toFixed(2):0;
-    const closes=j.chart.result[0].indicators?.quote?.[0]?.close?.filter(Boolean)??[];
-    if (closes.length>=2) SPARK[code]=closes.slice(-5).map(v=>+v.toFixed(2));
-    return {price:+price.toFixed(2),chg,pct,prev:+prev.toFixed(2),
+    // 不使用 Yahoo 的 closes 更新 SPARK，因為時間對應可能不準確
+    // SPARK 改由 TWSE 月線資料提供（fetchTWSEClose 裡處理）
+    return {price:+price.toFixed(2),chg,pct,
+            prev: prev ? +prev.toFixed(2) : null,  // null = 昨收未知，不顯示
             vol:Math.round((meta.regularMarketVolume??0)/1000),
             high:+(meta.regularMarketDayHigh??price).toFixed(2),
             low:+(meta.regularMarketDayLow??price).toFixed(2),src:'yahoo'};
@@ -834,6 +919,8 @@ async function fetchAllPrices() {
   setDot('dot-finnhub','off'); setDot('dot-proxy','off');
   clearLog();
   addLog('info', `開始抓取股價（${finnhubKey?'Finnhub主/Yahoo備':'Yahoo Finance備援'}），共 ${holdStocks.length + watchStocks.length} 檔…`);
+  // 同步抓三大法人（不等待，背景執行）
+  fetchInstitutional().then(() => { renderTable(); }).catch(()=>{});
   document.getElementById('data-src-label').textContent = finnhubKey ? 'Finnhub + Yahoo備援' : 'Yahoo Finance';
 
   const all = [...holdStocks, ...watchStocks];
@@ -1047,7 +1134,7 @@ function calcKD(highs, lows, closes, period=9) {
   return {
     k: kVal, d: dVal,
     zone: kVal>=80?'超買區':kVal<=20?'超賣區':kVal>=60?'偏強':'偏弱',
-    trend: kVal>dVal?'K>D多方':'K<D空方',
+    trend: kVal>dVal?'K>D（多方）':'K<D（空方）',
     cross,
   };
 }
@@ -1213,7 +1300,7 @@ async function showTechDetail(code, name) {
       ${row('MACD柱狀', macd.bar, c(macd.bar))}
       ${row('趨勢', macd.dif>macd.dea?'多頭排列':'空頭排列', macd.dif>macd.dea?'#00e676':'#ff4f4f')}
       ${macd.cross?row('交叉訊號', macd.cross, macd.cross.includes('黃金')?'#00e676':'#ff4f4f'):''}
-      <div style="margin-top:8px;font-size:10px;color:#3d5570;line-height:1.6">
+      <div style="margin-top:8px;font-size:11px;color:#7a9ab8;line-height:1.6">
         DIF>DEA且柱狀為正→多方強勢<br>DIF<DEA且柱狀為負→空方主導
       </div>
     `) : card('📊 MACD', '#00c9e8', '<div style="color:#3d5570;font-size:12px">資料不足</div>')}
@@ -1223,9 +1310,9 @@ async function showTechDetail(code, name) {
       ${row('K 值', kd.k, kd.k>=80?'#ff4f4f':kd.k<=20?'#00e676':'#dde6f0')}
       ${row('D 值', kd.d, kd.d>=80?'#ff4f4f':kd.d<=20?'#00e676':'#dde6f0')}
       ${row('位置', kd.zone, zc(kd.zone))}
-      ${row('趨勢', kd.trend, kd.k>kd.d?'#00e676':'#ff4f4f')}
+      ${row('趨勢方向', kd.k>kd.d?'K值在上（偏多）':'K值在下（偏空）', kd.k>kd.d?'#00e676':'#ff4f4f')}
       ${kd.cross?row('交叉', kd.cross, kd.cross.includes('黃金')?'#00e676':'#ff4f4f'):''}
-      <div style="margin-top:8px;font-size:10px;color:#3d5570;line-height:1.6">
+      <div style="margin-top:8px;font-size:11px;color:#7a9ab8;line-height:1.6">
         K>80超買留意回調；K<20超賣留意反彈<br>K向上穿越D→黃金交叉買訊
       </div>
     `) : card('📈 KD', '#ffab00', '<div style="color:#3d5570;font-size:12px">資料不足</div>')}
@@ -1253,7 +1340,7 @@ async function showTechDetail(code, name) {
       ${row('帶寬', bb.bw+'%', '#dde6f0')}
       ${row('位置判斷', bb.pos, bb.pos.includes('上軌')?'#ff4f4f':bb.pos.includes('下軌')?'#00e676':'#7a9ab8')}
       ${row('帶寬狀態', bb.squeeze, bb.squeeze.includes('收縮')?'#ffab00':'#7a9ab8')}
-      <div style="margin-top:8px;font-size:10px;color:#3d5570;line-height:1.6">
+      <div style="margin-top:8px;font-size:11px;color:#7a9ab8;line-height:1.6">
         帶寬收縮後常有大波動；%B>100突破上軌為強勢
       </div>
     `) : card('📉 布林通道', '#a78bfa', '<div style="color:#3d5570;font-size:12px">資料不足</div>')}
@@ -1371,23 +1458,16 @@ function renderTable() {
       : `<span class="skel" style="width:50px;height:14px"></span>`;
 
     // 昨收：優先用API的chartPreviousClose，次選反推，並標示可靠度
-    const prevClose = pd?.prev ?? (pd ? +(pd.price - pd.chg).toFixed(2) : null);
+    const prevClose = (pd?.prev && pd.prev > 0) ? pd.prev : null;
     const prevSrc   = pd?.prev ? 'API' : 'est';  // API=直接取得 est=反推估算
 
-    // 三大法人模擬資料（正=買超，負=賣超）
-    const INST = {
-      '1303.TW':  -2850, '6261.TWO': +1200, '3260.TWO': +3400,
-      '5289.TWO':  -980,  '2374.TW': +560,  '0050.TW': +18500,
-      '0056.TW':  +9200, '00631L.TW': -1200,'00981A.TW':+4500,
-      '8422.TW':  +220,  '2412.TW': -380,  '3022.TW': +890,
-      '1519.TW':  +3200, '2465.TW': -1500, '3526.TWO': +670,
-      '3004.TW':  +430,  '3653.TW': +5800,
-    };
-    const inst = INST[stock.code] ?? 0;
-    const instCell = `<div style="text-align:center;font-family:var(--mono);font-size:13px;font-weight:600;color:${inst>0?'var(--up)':inst<0?'var(--dn)':'var(--text2)'}">
-      ${inst>0?'+':''}${fmt(inst)}<br>
-      <span style="font-size:9px;color:var(--text3)">${inst>0?'買超':'賣超'}</span>
-    </div>`;
+    // 三大法人真實資料（TWSE/TPEx API）
+    const instRaw = getInstData(stock.code);
+    const inst    = instRaw?.net ?? null;
+    const instSrc = instRaw?.isLive ? '今日' : instRaw?.savedDate ? instRaw.savedDate.slice(4,6)+'/'+instRaw.savedDate.slice(6,8) : null;
+    const instCell = inst !== null
+      ? '<div style="text-align:center;font-family:var(--mono);font-size:13px;font-weight:600;color:'+(inst>0?'var(--up)':inst<0?'var(--dn)':'var(--text2)')+'">'+(inst>0?'+':'')+fmt(inst)+'<br><span style="font-size:9px;color:var(--text3)">'+(inst>0?'買超':'賣超')+(instSrc?'・'+instSrc:'')+'</span></div>'
+      : '<div style="text-align:center;color:var(--text3);font-size:11px">—<br><span style="font-size:9px">↻抓取後顯示</span></div>';
 
     const chgCell = pd
       ? `<div class="cv ${cls(pct)}">${chg >= 0 ? '+' : ''}${fmt(chg, 2)}<br>
@@ -1401,14 +1481,21 @@ function renderTable() {
     // 財務資料欄位
     const fin = FINS[stock.code] || {};
     const epsColor = fin.eps_ytd > 0 ? 'var(--up)' : fin.eps_ytd < 0 ? 'var(--dn)' : 'var(--text3)';
+    const finsDate = fin.fetchedAt ? fin.fetchedAt : null;
+    const finsTip  = finsDate ? `資料時間：${finsDate}（Gemini AI）` : '模擬資料';
     const epsCell = fin.eps_ly != null
-      ? `<div style="text-align:center;font-family:var(--mono);font-size:12px;line-height:1.8"><span style="color:var(--text2)" title="去年EPS">${fin.eps_ly.toFixed(1)}</span><br><span style="color:${epsColor};font-size:11px" title="今年累積EPS">${fin.eps_ytd!=null?(fin.eps_ytd>0?'+':'')+fin.eps_ytd.toFixed(1):'—'}</span></div>`
+      ? `<div style="text-align:center;font-family:var(--mono);font-size:12px;line-height:1.8" title="${finsTip}">
+           <span style="color:var(--text2)">${fin.eps_ly.toFixed(1)}</span><br>
+           <span style="color:${epsColor};font-size:11px">${fin.eps_ytd!=null?(fin.eps_ytd>0?'+':'')+fin.eps_ytd.toFixed(1):'—'}</span>
+           ${finsDate?'':'<br><span style="font-size:8px;color:var(--text3)">模擬</span>'}
+         </div>`
       : `<div style="text-align:center;color:var(--text3)">—</div>`;
+    const finNote = fin.fetchedAt ? fin.fetchedAt : (fin.eps_ly ? '模擬' : null);
     const gmCell = fin.gm != null
-      ? `<div style="text-align:center;font-family:var(--mono);font-size:13px;color:${fin.gm>=30?'var(--up)':fin.gm>=20?'var(--warn)':'var(--dn)'}">${fin.gm.toFixed(1)}%</div>`
+      ? `<div style="text-align:center;font-family:var(--mono);font-size:13px;color:${fin.gm>=30?'var(--up)':fin.gm>=20?'var(--warn)':'var(--dn)'}" title="${finNote?'資料時間：'+finNote:''}">${fin.gm.toFixed(1)}%${finNote?`<br><span style="font-size:8px;color:var(--text3)">${finNote}</span>`:''}</div>`
       : `<div style="text-align:center;color:var(--text3)">—</div>`;
     const yoyCell = fin.rev_yoy != null
-      ? `<div style="text-align:center;font-family:var(--mono);font-size:13px;font-weight:600;color:${fin.rev_yoy>0?'var(--up)':'var(--dn)'}">${fin.rev_yoy>0?'+':''}${fin.rev_yoy.toFixed(1)}%</div>`
+      ? `<div style="text-align:center;font-family:var(--mono);font-size:13px;font-weight:600;color:${fin.rev_yoy>0?'var(--up)':'var(--dn)'}" title="${finNote?'資料時間：'+finNote:''}">${fin.rev_yoy>0?'+':''}${fin.rev_yoy.toFixed(1)}%${finNote?`<br><span style="font-size:8px;color:var(--text3)">${finNote}</span>`:''}</div>`
       : `<div style="text-align:center;color:var(--text3)">—</div>`;
 
     const tr = document.createElement('tr');
@@ -1497,7 +1584,7 @@ function showDetail(code) {
                  : '<span class="src-mock">模擬資料</span>';
 
   // 昨收：直接從 priceData 取，TWSE MIS 的 y 欄位是最準確的
-  const prevClose = pd?.prev ?? null;
+  const prevClose = (pd?.prev && pd.prev > 0) ? pd.prev : null;
   const prevSrc   = (() => {
     const s = priceData[code]?.src;
     if (s==='twse-mis') return 'TWSE即時';
@@ -1895,18 +1982,38 @@ function runMockAnalysis(code, stock, pd, sc, modeStr) {
          ${sigs.includes('KD走弱')||sigs.includes('KD死叉')?'KD 指標走弱，短線謹慎追高。':''}
          ${sigs.includes('突破季線')?'已突破季線壓力，技術面轉為正向。':''}`);
 
-      const INST_DATA = {'1303.TW':-2850,'6261.TWO':1200,'3260.TWO':3400,'5289.TWO':-980,'2374.TW':560,'0050.TW':18500,'0056.TW':9200,'00631L.TW':-1200,'00981A.TW':4500,'8422.TW':220,'2412.TW':-380,'3022.TW':890,'1519.TW':3200,'2465.TW':-1500,'3526.TWO':670,'3004.TW':430,'3653.TW':5800};
-      const instVal = INST_DATA[code] ?? 0;
-      const instDesc = instVal > 2000 ? '大幅買超，法人積極建倉，籌碼面強勁有力。' :
-                       instVal > 0    ? '小幅買超，法人態度偏正向，持續追蹤。' :
-                       instVal < -2000? '大幅賣超，法人持續出脫，需留意下行風險。' :
-                       '小幅賣超，法人態度偏保守，觀察後續動向。';
+          const instRaw2  = getInstData(code);
+      const instVal   = instRaw2?.net ?? null;
+      const instF     = instRaw2?.f   ?? null;  // 外資
+      const instI     = instRaw2?.i   ?? null;  // 投信
+      const instD     = instRaw2?.d   ?? null;  // 自營商
+      const instDate  = instRaw2?.isLive ? '今日' : instRaw2?.savedDate ? instRaw2.savedDate.slice(0,4)+'/'+instRaw2.savedDate.slice(4,6)+'/'+instRaw2.savedDate.slice(6,8) : null;
 
-      html += section('法人買賣超解讀',
-        `今日三大法人合計 <b style="color:${instVal>=0?'#00e676':'#ff4f4f'}">${instVal>=0?'+':''}${instVal.toLocaleString()}張</b>（${instVal>=0?'買超':'賣超'}）。
-         ${instDesc}
-         ${stock?.sector?.includes('ETF')?'ETF法人買賣超主要反映定期定額與機構配置需求變化，與一般股票意義不同。':
-           '建議搭配外資期貨未平倉量（多單/空單）一併判斷方向。'}`);
+      if (instVal !== null) {
+        const instDesc = instVal > 2000 ? '大幅買超，法人積極建倉，籌碼面強勁有力。' :
+                         instVal > 0    ? '小幅買超，法人態度偏正向。' :
+                         instVal < -2000? '大幅賣超，法人持續出脫，需留意下行風險。' :
+                                          '小幅賣超，法人態度偏保守。';
+        html += section('法人買賣超（' + (instDate||'') + '）',
+          '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px">' +
+          '<div style="text-align:center;background:rgba(0,0,0,.2);border-radius:6px;padding:8px">' +
+            '<div style="font-size:10px;color:#3d5570;margin-bottom:3px">外資</div>' +
+            '<div style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:600;color:' + (instF>=0?'#00e676':'#ff4f4f') + '">' + (instF>=0?'+':'') + (instF||0).toLocaleString() + '</div></div>' +
+          '<div style="text-align:center;background:rgba(0,0,0,.2);border-radius:6px;padding:8px">' +
+            '<div style="font-size:10px;color:#3d5570;margin-bottom:3px">投信</div>' +
+            '<div style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:600;color:' + (instI>=0?'#00e676':'#ff4f4f') + '">' + (instI>=0?'+':'') + (instI||0).toLocaleString() + '</div></div>' +
+          '<div style="text-align:center;background:rgba(0,0,0,.2);border-radius:6px;padding:8px">' +
+            '<div style="font-size:10px;color:#3d5570;margin-bottom:3px">自營商</div>' +
+            '<div style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:600;color:' + (instD>=0?'#00e676':'#ff4f4f') + '">' + (instD>=0?'+':'') + (instD||0).toLocaleString() + '</div></div>' +
+          '<div style="text-align:center;background:rgba(0,0,0,.2);border-radius:6px;padding:8px;border:1px solid rgba(0,201,232,.2)">' +
+            '<div style="font-size:10px;color:#00c9e8;margin-bottom:3px">三大合計</div>' +
+            '<div style="font-family:JetBrains Mono,monospace;font-size:14px;font-weight:700;color:' + (instVal>=0?'#00e676':'#ff4f4f') + '">' + (instVal>=0?'+':'') + instVal.toLocaleString() + '</div></div>' +
+          '</div>' +
+          instDesc + (stock?.sector?.includes('ETF')?' ETF法人數據反映機構配置需求。':' 建議搭配外資期貨部位一併判斷。'));
+      } else {
+        html += section('法人買賣超',
+          '<div style="color:#3d5570;font-size:12px">尚未取得資料，請點「↻ 抓取報價」後再執行分析</div>');
+      }
 
       html += section('財務數據評估',
         `${fin2.eps_ly?`去年全年 EPS ${fin2.eps_ly} 元，今年累積 EPS ${fin2.eps_ytd>0?'+':''}${fin2.eps_ytd??'—'} 元。`:'ETF 不適用 EPS 評估。'}
