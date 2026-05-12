@@ -705,21 +705,39 @@ async function fetchTWSEClose(code) {
   const no = code.replace('.TWO','').replace('.TW','');
   try {
     // 嘗試上市
-    const urls = [
-      `https://corsproxy.io/?${encodeURIComponent(`https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY?stockNo=${no}&date=${getTodayStr()}`)}`,
+    // 用當月日線資料（含精確收盤與昨收）
+  const yyyymm = getTodayStr().slice(0,6);
+  const urls = [
+      // 主要：當月 STOCK_DAY（有完整 OHLCV）
+      `https://corsproxy.io/?${encodeURIComponent(`https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymm}01&stockNo=${no}`)}`,
+      // 備援：STOCK_DAY_AVG
       `https://corsproxy.io/?${encodeURIComponent(`https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_AVG?stockNo=${no}`)}`,
+      // 第二備援：allorigins
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymm}01&stockNo=${no}`)}`,
     ];
     for (const url of urls) {
       try {
         const r = await fetch(url, {signal: AbortSignal.timeout(8000)});
         if (!r.ok) continue;
-        const arr = await r.json();
+        const raw = await r.json();
+        // 處理兩種格式：STOCK_DAY (有 stat+data) 或 OpenAPI (直接陣列)
+        let arr;
+        if (raw.stat && raw.data) {
+          arr = raw.data;  // STOCK_DAY 格式
+        } else if (Array.isArray(raw)) {
+          arr = raw;       // OpenAPI 陣列格式
+        } else {
+          continue;
+        }
         if (!arr||!arr.length) continue;
         const latest = arr[arr.length-1];
         // 欄位名稱可能是中文或英文
         const price = parseFloat(latest.ClosingPrice||latest['收盤價']||latest.close||0);
         // 倒數第2筆是前一交易日收盤（真正的昨收）
-        const prev  = arr.length>=2 ? parseFloat(arr[arr.length-2].ClosingPrice||arr[arr.length-2]['收盤價']||0)||null : null;
+        const prevRow = arr.length >= 2 ? arr[arr.length-2] : null;
+        const prev = prevRow ? parseFloat(
+          prevRow.ClosingPrice || prevRow['收盤價'] || prevRow.close || 0
+        ) || null : null;
         const high  = parseFloat(latest.HighestPrice||latest['最高價']||price);
         const low   = parseFloat(latest.LowestPrice||latest['最低價']||price);
         const vol   = Math.round(parseFloat(latest.TradeVolume||latest['成交股數']||latest.TradeValue||0)/1000);
@@ -855,18 +873,30 @@ async function fetchYahoo(code, idx=0) {
     const j = await r.json();
     const meta = j?.chart?.result?.[0]?.meta;
     if (!meta) throw new Error('no meta');
-    const price=meta.regularMarketPrice??meta.previousClose;
-    // 只用 regularMarketPreviousClose，這是唯一正確的昨收欄位
-    // 絕對不用 chartPreviousClose（它是K線圖第一筆前的值，不是昨收）
-    const prev=meta.regularMarketPreviousClose??null;
+    const price = meta.regularMarketPrice ?? meta.previousClose;
+    // 昨收取值優先順序：
+    // 1. regularMarketPreviousClose（最標準）
+    // 2. chartPreviousClose（range=1d 時等同昨收）
+    // 3. previousClose（舊版欄位）
+    const prev = (meta.regularMarketPreviousClose > 0 ? meta.regularMarketPreviousClose
+               : meta.chartPreviousClose > 0 ? meta.chartPreviousClose
+               : meta.previousClose > 0 ? meta.previousClose
+               : null);
     const chg=+(price-prev).toFixed(2), pct=prev?+(chg/prev*100).toFixed(2):0;
     // 不使用 Yahoo 的 closes 更新 SPARK，因為時間對應可能不準確
     // SPARK 改由 TWSE 月線資料提供（fetchTWSEClose 裡處理）
-    return {price:+price.toFixed(2),chg,pct,
-            prev: prev ? +prev.toFixed(2) : null,  // null = 昨收未知，不顯示
-            vol:Math.round((meta.regularMarketVolume??0)/1000),
-            high:+(meta.regularMarketDayHigh??price).toFixed(2),
-            low:+(meta.regularMarketDayLow??price).toFixed(2),src:'yahoo'};
+    // chg/pct
+    const chgY = (prev && prev > 0) ? +(price - prev).toFixed(2) : null;
+    const pctY = (prev && prev > 0 && chgY !== null) ? +(chgY / prev * 100).toFixed(2) : null;
+    return {
+      price: +price.toFixed(2),
+      chg: chgY, pct: pctY,
+      prev: prev ? +prev.toFixed(2) : null,
+      vol:  Math.round((meta.regularMarketVolume??0)/1000),
+      high: +(meta.regularMarketDayHigh??price).toFixed(2),
+      low:  +(meta.regularMarketDayLow??price).toFixed(2),
+      src: 'yahoo'
+    };
   } catch(e) {
     if (idx+1<YF_PROXIES.length) {
       addLog('warn',`${code} Yahoo proxy${idx+1}失敗，切換備用…`);
@@ -1469,9 +1499,11 @@ function renderTable() {
       ? '<div style="text-align:center;font-family:var(--mono);font-size:13px;font-weight:600;color:'+(inst>0?'var(--up)':inst<0?'var(--dn)':'var(--text2)')+'">'+(inst>0?'+':'')+fmt(inst)+'<br><span style="font-size:9px;color:var(--text3)">'+(inst>0?'買超':'賣超')+(instSrc?'・'+instSrc:'')+'</span></div>'
       : '<div style="text-align:center;color:var(--text3);font-size:11px">—<br><span style="font-size:9px">↻抓取後顯示</span></div>';
 
-    const chgCell = pd
+    const chgCell = (pd && chg !== null && pct !== null)
       ? `<div class="cv ${cls(pct)}">${chg >= 0 ? '+' : ''}${fmt(chg, 2)}<br>
            <span style="font-size:11px">${fmtP(pct)}</span></div>`
+      : pd
+      ? `<div class="cv neu">— <br><span style="font-size:11px">—</span></div>`
       : `<span class="skel" style="width:40px;height:12px"></span>`;
 
     const volCell = pd
