@@ -602,7 +602,7 @@ async function fetchFinsWithGemini() {
 
   try {
     const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
       { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
           contents:[{parts:[{text:prompt}]}],
@@ -692,10 +692,10 @@ async function fetchTWSEMIS(code) {
     const high  = parseFloat(d.h);
     const low   = parseFloat(d.l);
     const vol   = Math.round(parseFloat(d.v||0));
-    const chg   = +(price-prev).toFixed(2);
-    const pct   = prev ? +(chg/prev*100).toFixed(2) : 0;
+    const chg   = (prev && prev > 0) ? +(price-prev).toFixed(2) : null;
+    const pct   = (prev && prev > 0 && chg !== null) ? +(chg/prev*100).toFixed(2) : null;
     if (!price||price===0) throw new Error('price=0');
-    return {price, chg, pct, prev, vol, high, low, src:'twse-mis'};
+    return {price, chg, pct, prev: (prev>0?prev:null), vol, high, low, src:'twse-mis'};
   } catch(e) { return null; }
 }
 
@@ -906,26 +906,133 @@ async function fetchYahoo(code, idx=0) {
   }
 }
 
+// ══════════════════════════════════════════════════════════
+// 昨收終極取值函數：依序嘗試所有來源直到取得有效值
+// 最可靠：TWSE MIS y 欄位 > TWSE STOCK_DAY 倒數第2筆 > Yahoo
+// ══════════════════════════════════════════════════════════
+async function fetchPrevClose(code) {
+  const no    = code.replace('.TWO','').replace('.TW','');
+  const isOTC = code.endsWith('.TWO');
+  const isTW  = code.endsWith('.TW') || code.endsWith('.TWO');
+  if (!isTW) return null;  // 美股不處理
+
+  // ── 嘗試1：TWSE MIS 即時 y 欄位（盤中最準）──
+  try {
+    const misCode = toMISCode(code);
+    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${misCode}&json=1&delay=0`;
+    for (const pfn of [
+      u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+      u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+    ]) {
+      try {
+        const r = await fetch(pfn(url), {signal: AbortSignal.timeout(6000)});
+        if (!r.ok) continue;
+        const j = await r.json();
+        const d = j?.msgArray?.[0];
+        const y = parseFloat(d?.y);
+        if (y > 0) { addLog('ok', `昨收[MIS] ${code}: ${y}`); return y; }
+      } catch(e) {}
+    }
+  } catch(e) {}
+
+  // ── 嘗試2：TWSE STOCK_DAY 當月（倒數第2筆）──
+  try {
+    const yyyymm = getTodayStr().slice(0,6);
+    const base = isOTC
+      ? `https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock/result?date=${yyyymm.slice(0,4)}/${yyyymm.slice(4,6)}/01&stockCode=${no}&response=json`
+      : `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymm}01&stockNo=${no}`;
+    for (const pfn of [
+      u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+      u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+      u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+    ]) {
+      try {
+        const r = await fetch(pfn(base), {signal: AbortSignal.timeout(8000)});
+        if (!r.ok) continue;
+        const raw = await r.json();
+        // 支援兩種格式
+        const rows = raw.data || (Array.isArray(raw) ? raw : null);
+        if (!rows || rows.length < 2) continue;
+        // 取倒數第2筆收盤
+        const prevRow = rows[rows.length - 2];
+        // STOCK_DAY 格式：[日期,量,金,開,高,低,收,...]
+        // OpenAPI 格式：{ClosingPrice: ...} 或 {'收盤價': ...}
+        const p = Array.isArray(prevRow)
+          ? parseFloat((prevRow[6]||'').replace(/,/g,''))
+          : parseFloat(prevRow.ClosingPrice || prevRow['收盤價'] || 0);
+        if (p > 0) { addLog('ok', `昨收[STOCK_DAY] ${code}: ${p}`); return p; }
+      } catch(e) {}
+    }
+  } catch(e) {}
+
+  // ── 嘗試3：Yahoo Finance（多欄位試探）──
+  try {
+    for (const range of ['1d','2d','5d']) {
+      const yurl = `https://query1.finance.yahoo.com/v8/finance/chart/${code}?interval=1d&range=${range}`;
+      for (const pfn of [
+        u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+        u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+      ]) {
+        try {
+          const r = await fetch(pfn(yurl), {signal: AbortSignal.timeout(8000)});
+          if (!r.ok) continue;
+          const j = await r.json();
+          const meta   = j?.chart?.result?.[0]?.meta;
+          const closes = j?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.filter(v=>v&&v>0) || [];
+          // 優先用 regularMarketPreviousClose
+          const rmp = parseFloat(meta?.regularMarketPreviousClose);
+          if (rmp > 0) { addLog('ok', `昨收[Yahoo-rmp] ${code}: ${rmp}`); return rmp; }
+          // 次選 chartPreviousClose
+          const cpc = parseFloat(meta?.chartPreviousClose);
+          if (cpc > 0) { addLog('ok', `昨收[Yahoo-cpc] ${code}: ${cpc}`); return cpc; }
+          // 再次選 closes 倒數第2筆（只在有2筆以上時才可信）
+          if (closes.length >= 2 && range !== '1d') {
+            const p2 = closes[closes.length - 2];
+            if (p2 > 0) { addLog('ok', `昨收[Yahoo-closes] ${code}: ${p2.toFixed(2)}`); return +p2.toFixed(2); }
+          }
+        } catch(e) {}
+      }
+    }
+  } catch(e) {}
+
+  addLog('warn', `昨收無法取得: ${code}`);
+  return null;
+}
+
 // ── 統一入口：智慧選擇最佳來源 ──────────────────────
 async function fetchOne(code) {
   const isTW = code.endsWith('.TW') || code.endsWith('.TWO');
   const isOpen = isTWSEOpen();
 
   if (isTW) {
+    let result = null;
     if (isOpen) {
       // 台股盤中：TWSE MIS 即時
-      const d = await fetchTWSEMIS(code);
-      if (d) { addLog('ok',`✓ ${code} [TWSE即時] ${d.price} ${d.chg>=0?'+':''}${d.chg}(${d.pct}%)`); return d; }
-      addLog('warn',`${code} TWSE MIS 失敗，改用 Yahoo…`);
-    } else {
-      // 台股盤後：TWSE OpenAPI 收盤
-      const d = await fetchTWSEClose(code);
-      if (d) { addLog('ok',`✓ ${code} [TWSE收盤] ${d.price} ${d.chg>=0?'+':''}${d.chg}(${d.pct}%)`); return d; }
-      addLog('warn',`${code} TWSE收盤API失敗，改用 Yahoo…`);
+      result = await fetchTWSEMIS(code);
+      if (result) addLog('ok',`✓ ${code} [TWSE即時] ${result.price}`);
     }
-    // 台股備援：Yahoo Finance
-    const dy = await fetchYahoo(code);
-    if (dy) { addLog('ok',`✓ ${code} [Yahoo] ${dy.price} ${dy.chg>=0?'+':''}${dy.chg}`); return dy; }
+    if (!result) {
+      // 台股盤後或MIS失敗：TWSE OpenAPI 收盤
+      result = await fetchTWSEClose(code);
+      if (result) addLog('ok',`✓ ${code} [TWSE收盤] ${result.price}`);
+    }
+    if (!result) {
+      // 台股備援：Yahoo Finance
+      result = await fetchYahoo(code);
+      if (result) addLog('ok',`✓ ${code} [Yahoo] ${result.price}`);
+    }
+    if (result) {
+      // 補抓昨收（如果 prev 為 null）
+      if (!result.prev || result.prev <= 0) {
+        const p = await fetchPrevClose(code);
+        if (p) {
+          result.prev = p;
+          result.chg  = +(result.price - p).toFixed(2);
+          result.pct  = +(result.chg / p * 100).toFixed(2);
+        }
+      }
+      return result;
+    }
   } else {
     // 美股：Finnhub → Yahoo
     if (finnhubKey) {
@@ -1763,7 +1870,7 @@ async function testKey() {
   if (!key) { setKeyStatus('請先輸入 API Key', 'err'); return; }
   setKeyStatus('測試連線中…', 'testing');
   try {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${key}`, {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`, {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({contents:[{parts:[{text:'回答「OK」兩個字'}]}]})
     });
@@ -1898,7 +2005,7 @@ EPS（去年/今年累積）：${fin2.eps_ly??'—'} / ${fin2.eps_ytd??'—'}
   }
 
   try {
-    const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
+    const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
     const r = await fetch(GEMINI_URL, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
