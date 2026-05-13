@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -730,25 +731,43 @@ async function fetchTWSEClose(code) {
           continue;
         }
         if (!arr||!arr.length) continue;
-        const latest = arr[arr.length-1];
-        // 欄位名稱可能是中文或英文
-        const price = parseFloat(latest.ClosingPrice||latest['收盤價']||latest.close||0);
-        // 倒數第2筆是前一交易日收盤（真正的昨收）
-        const prevRow = arr.length >= 2 ? arr[arr.length-2] : null;
-        const prev = prevRow ? parseFloat(
-          prevRow.ClosingPrice || prevRow['收盤價'] || prevRow.close || 0
-        ) || null : null;
-        const high  = parseFloat(latest.HighestPrice||latest['最高價']||price);
-        const low   = parseFloat(latest.LowestPrice||latest['最低價']||price);
-        const vol   = Math.round(parseFloat(latest.TradeVolume||latest['成交股數']||latest.TradeValue||0)/1000);
-        const chg   = +(price-prev).toFixed(2);
-        const pct   = prev ? +(chg/prev*100).toFixed(2) : 0;
+        const latest  = arr[arr.length - 1];   // 最新交易日（昨天）
+        const prevDay = arr.length >= 2 ? arr[arr.length - 2] : null; // 前天
+
+        // 解析收盤價（支援 STOCK_DAY 陣列格式 和 OpenAPI 物件格式）
+        const parseClose = row => {
+          if (!row) return 0;
+          return Array.isArray(row)
+            ? parseFloat((row[6]||'0').replace(/,/g,''))   // 陣列格式：index 6 = 收盤
+            : parseFloat(row.ClosingPrice||row['收盤價']||row.close||0);
+        };
+        const parseVol = row => {
+          if (!row) return 0;
+          return Array.isArray(row)
+            ? Math.round(parseFloat((row[1]||'0').replace(/,/g,''))/1000)
+            : Math.round(parseFloat(row.TradeVolume||row['成交股數']||0)/1000);
+        };
+        const parseHigh = row => Array.isArray(row)
+          ? parseFloat((row[4]||'0').replace(/,/g,''))
+          : parseFloat(row.HighestPrice||row['最高價']||0);
+        const parseLow = row => Array.isArray(row)
+          ? parseFloat((row[5]||'0').replace(/,/g,''))
+          : parseFloat(row.LowestPrice||row['最低價']||0);
+
+        // price = 昨天收盤（盤後顯示用）
+        // prev  = 前天收盤（用來計算昨天的漲跌幅）
+        const price = parseClose(latest);
+        const prev  = prevDay ? parseClose(prevDay) : null;
+        const high  = parseHigh(latest) || price;
+        const low   = parseLow(latest)  || price;
+        const vol   = parseVol(latest);
+        // chg/pct = 昨天相對前天的漲跌（盤後模式下的正確呈現）
+        const chg = (prev && prev > 0) ? +(price - prev).toFixed(2) : null;
+        const pct = (prev && prev > 0 && chg !== null) ? +(chg / prev * 100).toFixed(2) : null;
         if (!price||price===0) continue;
         // 用真實收盤序列更新近5日走勢
         if (arr.length >= 5) {
-          SPARK[code] = arr.slice(-5).map(r =>
-            parseFloat(r.ClosingPrice||r['收盤價']||0)
-          ).filter(v=>v>0);
+          SPARK[code] = arr.slice(-5).map(r => parseClose(r)).filter(v => v > 0);
         }
         return {price, chg, pct, prev, vol, high, low, src:'twse'};
       } catch(e2) { continue; }
@@ -954,13 +973,12 @@ async function fetchPrevClose(code) {
         const rows = raw.data || (Array.isArray(raw) ? raw : null);
         if (!rows || rows.length < 2) continue;
         // 取倒數第2筆收盤
-        const prevRow = rows[rows.length - 2];
-        // STOCK_DAY 格式：[日期,量,金,開,高,低,收,...]
-        // OpenAPI 格式：{ClosingPrice: ...} 或 {'收盤價': ...}
-        const p = Array.isArray(prevRow)
-          ? parseFloat((prevRow[6]||'').replace(/,/g,''))
-          : parseFloat(prevRow.ClosingPrice || prevRow['收盤價'] || 0);
-        if (p > 0) { addLog('ok', `昨收[STOCK_DAY] ${code}: ${p}`); return p; }
+        // 昨收 = 最後一筆（最新交易日收盤）
+        const lastRow3 = rows[rows.length - 1];
+        const p = Array.isArray(lastRow3)
+          ? parseFloat((lastRow3[6]||'').replace(/,/g,''))
+          : parseFloat(lastRow3.ClosingPrice || lastRow3['收盤價'] || 0);
+        if (p > 0) { addLog('ok', `昨收[STOCK_DAY最新] ${code}: ${p}`); return p; }
       } catch(e) {}
     }
   } catch(e) {}
@@ -1022,10 +1040,20 @@ async function fetchOne(code) {
       if (result) addLog('ok',`✓ ${code} [Yahoo] ${result.price}`);
     }
     if (result) {
-      // 補抓昨收（如果 prev 為 null）
-      if (!result.prev || result.prev <= 0) {
+      // 盤後模式（TWSE Close）：
+      //   result.price = 最新交易日收盤（昨收）
+      //   result.prev  = 前天收盤（用來算昨天漲跌）
+      // 盤中模式（MIS/Yahoo）：
+      //   result.price = 即時價格
+      //   result.prev  = 昨收（需要確保正確）
+
+      if (result.src === 'twse') {
+        // 盤後：price 就是昨收，不需要額外補抓
+        // prev 是前天，chg/pct 已正確計算
+      } else if (!result.prev || result.prev <= 0) {
+        // 盤中：prev 為空，補抓昨收
         const p = await fetchPrevClose(code);
-        if (p) {
+        if (p && p > 0) {
           result.prev = p;
           result.chg  = +(result.price - p).toFixed(2);
           result.pct  = +(result.chg / p * 100).toFixed(2);
@@ -1595,7 +1623,11 @@ function renderTable() {
       : `<span class="skel" style="width:50px;height:14px"></span>`;
 
     // 昨收：優先用API的chartPreviousClose，次選反推，並標示可靠度
-    const prevClose = (pd?.prev && pd.prev > 0) ? pd.prev : null;
+    const prevClose = (() => {
+    if (!pd) return null;
+    if (pd.src === 'twse') return pd.price;
+    return (pd.prev && pd.prev > 0) ? pd.prev : null;
+  })();
     const prevSrc   = pd?.prev ? 'API' : 'est';  // API=直接取得 est=反推估算
 
     // 三大法人真實資料（TWSE/TPEx API）
@@ -1927,69 +1959,31 @@ async function runAI(code, name, sector) {
   const stock = [...holdStocks, ...watchStocks].find(s => s.code === code);
   const pd    = priceData[code];
   const sc    = calcScore(stock, pd);
-  const fin2  = FINS[code] || {};
-  const src   = priceSource[code] === 'live' ? 'Yahoo Finance（15分鐘延遲）' : '模擬資料';
+  const fin2 = FINS[code] || {};
   const modeStr   = currentMode === 'before' ? '盤前' : '盤後';
   const modeColor = currentMode === 'before' ? '#00c9e8' : '#00e676';
   const modeInstr = currentMode === 'before'
-    ? '①昨日技術形態與今日開盤預判 ②關鍵支撐壓力位 ③法人籌碼方向 ④操作建議（買進/持有/觀察/賣出）'
-    : '①今日量價複盤 ②技術指標現況（MA/KD/RSI/布林） ③法人買賣超解讀 ④財務數據評估 ⑤明日操作策略';
+    ? '請依序分析：\n【技術形態與開盤預判】昨收與今日預判方向，關鍵支撐壓力\n【總體經濟影響】產業相關總經因素\n【法人籌碼方向】三大法人動態解讀\n【操作建議】明確說明建議動作（買進/持有/觀察/賣出）及理由\n【主要風險】列出2-3個風險點'
+    : '請依序分析：\n【今日量價複盤】成交量能與價格走勢\n【技術指標現況】MACD/KD/RSI/布林通道現況\n【法人買賣超解讀】三大法人動態\n【財務數據評估】EPS/毛利率/營收評估\n【明日操作策略】明確說明建議動作（買進/持有/觀察/賣出）及停損點';
 
-  const prompt = `你是台股專業分析師。請用繁體中文，針對以下個股給出完整的${modeStr}分析報告，格式清晰易懂。
+  const instRaw3  = getInstData(code);
+  const instStr   = instRaw3 ? `三大法人合計${instRaw3.net>=0?'+':''}${instRaw3.net}張（外資${instRaw3.f>=0?'+':''}${instRaw3.f}，投信${instRaw3.i>=0?'+':''}${instRaw3.i}，自營${instRaw3.d>=0?'+':''}${instRaw3.d}）` : '尚未取得';
 
-個股：${code.replace('.TWO','').replace('.TW','')} ${name}　產業：${sector||stock?.sector||'不明'}
+  const prompt = `你是專業台股分析師，請用繁體中文針對以下個股撰寫完整的${modeStr}分析報告，每個段落至少2-3句話，總字數300-500字。
+
+【個股資訊】
+代號：${code.replace('.TWO','').replace('.TW','')} ${name}　產業：${sector||stock?.sector||'不明'}
 現價：${pd?.price??'不明'} 元　昨收：${pd?.prev??'不明'} 元
-漲跌：${pd?(pd.chg>=0?'+':'')+pd.chg+'元 ('+pd.pct.toFixed(2)+'%)':'不明'}
+漲跌：${pd?(pd.chg!=null?(pd.chg>=0?'+':'')+pd.chg+'元 ('+(pd.pct!=null?pd.pct.toFixed(2):'?')+'%)':'—'):'不明'}
 今日區間：${pd?pd.low+'～'+pd.high:'不明'}　成交量：${pd?fmt(pd.vol,0)+'張':'不明'}
-三大法人：${(()=>{const INST={'1303.TW':-2850,'6261.TWO':1200,'3260.TWO':3400,'5289.TWO':-980,'2374.TW':560,'0050.TW':18500,'0056.TW':9200,'00631L.TW':-1200,'00981A.TW':4500,'8422.TW':220,'2412.TW':-380,'3022.TW':890,'1519.TW':3200,'2465.TW':-1500,'3526.TWO':670,'3004.TW':430,'3653.TW':5800};const v=INST[code]??0;return (v>0?'+':'')+v+'張 '+(v>0?'買超':'賣超（模擬）')})()}（⚠模擬）
 技術訊號：${(SIGS[code]||[]).join('、')||'無'}
-EPS（去年/今年累積）：${fin2.eps_ly??'—'} / ${fin2.eps_ytd??'—'}
-毛利率：${fin2.gm??'—'}%　營收YOY：${fin2.rev_yoy??'—'}%
-綜合評分：${sc.score}/100
+法人：${instStr}
+EPS(去年/今年累積)：${fin2.eps_ly??'—'} / ${fin2.eps_ytd??'—'}　毛利率：${fin2.gm??'—'}%　營收YOY：${fin2.rev_yoy??'—'}%
+資料來源：${src}
 
-請依照${modeStr}分析，包含：${modeInstr}
-格式要求：用【】標示各段落標題，結論要清楚給出「建議動作：買進/持有/觀察/賣出」及「理由」。`;
+${modeInstr}
 
-  // 建立 Artifact 視窗
-  const overlay = document.createElement('div');
-  overlay.id = 'ai-artifact-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px';
-  overlay.onclick = e => { if(e.target === overlay) overlay.remove(); };
-
-  overlay.innerHTML = `
-  <div style="background:#0d1624;border:1px solid #243554;border-radius:16px;width:100%;max-width:720px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden">
-    <!-- 標題列 -->
-    <div style="padding:16px 20px;border-bottom:1px solid #1a2840;display:flex;align-items:center;gap:12px;flex-shrink:0">
-      <div style="width:28px;height:28px;background:linear-gradient(135deg,#00c9e8,#0088bb);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#000">AI</div>
-      <div>
-        <div style="font-size:15px;font-weight:700;color:#dde6f0;font-family:'JetBrains Mono',monospace">${code.replace('.TWO','').replace('.TW','')} ${name}</div>
-        <div style="font-size:11px;color:#7a9ab8;margin-top:1px">${sector||stock?.sector} ｜ <span style="color:${modeColor};font-weight:600">${modeStr}分析</span> ｜ ${src}</div>
-      </div>
-      <button onclick="document.getElementById('ai-artifact-overlay').remove()" style="margin-left:auto;background:rgba(61,85,112,.2);border:1px solid #3d5570;color:#8ba4c0;font-size:16px;cursor:pointer;padding:2px 10px;border-radius:5px;line-height:1.5">✕ 關閉</button>
-    </div>
-    <!-- 數據摘要列 -->
-    <div style="padding:10px 20px;background:#111827;border-bottom:1px solid #1a2840;display:flex;gap:16px;flex-wrap:wrap;flex-shrink:0">
-      <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:${pd?.pct>=0?'#00e676':'#ff4f4f'}">${pd?fmt(pd.price,2):'—'} (${pd?fmtP(pd.pct):'—'})</span>
-      <span style="font-size:11px;color:#7a9ab8">量 ${pd?fmt(pd.vol,0)+'張':'—'}</span>
-      <span style="font-size:11px;color:#7a9ab8">區間 ${pd?pd.low+'～'+pd.high:'—'}</span>
-      <span style="font-size:11px;color:#7a9ab8">評分 <b style="color:${sc.score>=70?'#00e676':sc.score>=50?'#ffab00':'#ff4f4f'}">${sc.score}</b>/100</span>
-    </div>
-    <!-- 分析內容 -->
-    <div id="ai-artifact-body" style="padding:20px;overflow-y:auto;flex:1;font-size:13px;line-height:1.85;color:#b0c4d8">
-      <div style="display:flex;align-items:center;gap:8px;color:#3d5570;font-size:12px">
-        <div style="width:5px;height:5px;border-radius:50%;background:#00c9e8;animation:blink 1s infinite"></div>
-        Claude 正在生成${modeStr}分析報告，請稍候…
-      </div>
-    </div>
-    <!-- 底部 -->
-    <div style="padding:10px 20px;border-top:1px solid #1a2840;font-size:10px;color:#3d5570;flex-shrink:0;display:flex;justify-content:space-between;align-items:center">
-      <span>⚠ 分析僅供參考，投資請自行判斷風險</span>
-      <button onclick="document.getElementById('ai-artifact-overlay').remove()" style="font-size:11px;padding:4px 14px;background:rgba(0,201,232,.09);border:1px solid rgba(0,201,232,.25);color:#00c9e8;border-radius:5px;cursor:pointer">關閉</button>
-    </div>
-  </div>`;
-
-  document.body.appendChild(overlay);
-  setDot('dot-ai', 'ok');
+最後必須明確給出：「建議動作：買進/持有/觀察/賣出」並說明理由和停損點。`;
 
   // ── 呼叫 Gemini API ──
   const body = document.getElementById('ai-artifact-body');
@@ -2024,7 +2018,7 @@ EPS（去年/今年累積）：${fin2.eps_ly??'—'} / ${fin2.eps_ytd??'—'}
     body.innerHTML = html +
       `<div style="margin-top:14px;padding-top:10px;border-top:1px solid #1a2840;display:flex;gap:6px;flex-wrap:wrap">
         ${(SIGS[code]||[]).map(s=>`<span style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid rgba(0,201,232,.2);color:#00c9e8;background:rgba(0,201,232,.06)">${s}</span>`).join('')}
-        <span style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid rgba(0,230,118,.2);color:#00e676;background:rgba(0,230,118,.06)">Gemini 2.0 Flash</span>
+        <span style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid rgba(0,230,118,.2);color:#00e676;background:rgba(0,230,118,.06)">Gemini 2.5 Flash</span>
         <span style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid rgba(255,171,0,.2);color:#ffab00;background:rgba(255,171,0,.06)">評分 ${sc.score}/100</span>
       </div>`;
     setDot('dot-ai', 'ok');
