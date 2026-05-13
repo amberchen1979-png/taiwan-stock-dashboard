@@ -11,7 +11,7 @@
 :root{
   --bg:#080d18;--bg2:#0f1624;--bg3:#151e30;--bg4:#1a2540;
   --border:#1a2840;--border2:#243554;--border3:#2d4268;
-  --text:#dde6f0;--text2:#7a9ab8;--text3:#3d5570;
+  --text:#ffffff;--text2:#c0d4e8;--text3:#8aa8c8;
   --accent:#00c9e8;--accent2:#0088bb;
   --up:#00e676;--dn:#ff4f4f;--warn:#ffab00;
   --card-r:10px;
@@ -30,9 +30,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14
 .hdr-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .clock{font-family:var(--mono);font-size:12px;color:var(--accent);background:rgba(0,201,232,.07);border:1px solid rgba(0,201,232,.18);padding:4px 10px;border-radius:6px}
 .mode-grp{display:flex;background:var(--bg3);border:1px solid var(--border);border-radius:7px;overflow:hidden}
-.mode-btn{padding:5px 13px;font-size:12px;cursor:pointer;border:none;background:transparent;color:var(--text2);font-family:var(--sans);transition:all .2s}
+.mode-btn{padding:5px 13px;font-size:12px;cursor:pointer;border:none;background:transparent;color:var(--text);font-family:var(--sans);transition:all .2s}
 .mode-btn.active{background:var(--accent2);color:#fff;font-weight:500}
-.icon-btn{padding:5px 12px;font-size:12px;background:transparent;border:1px solid var(--border2);color:var(--text2);border-radius:7px;cursor:pointer;font-family:var(--sans);transition:all .2s;display:flex;align-items:center;gap:5px}
+.icon-btn{padding:5px 12px;font-size:12px;background:transparent;border:1px solid var(--border2);color:var(--text);border-radius:7px;cursor:pointer;font-family:var(--sans);transition:all .2s;display:flex;align-items:center;gap:5px}
 .icon-btn:hover,.icon-btn.loading-btn{border-color:var(--accent);color:var(--accent)}
 @keyframes spin{to{transform:rotate(360deg)}}
 .spin{animation:spin .7s linear infinite;display:inline-block}
@@ -43,7 +43,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14
 .api-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;transition:all .3s}
 .api-dot.ok{background:var(--up);box-shadow:0 0 5px var(--up);animation:blink 2s infinite}
 .api-dot.warn{background:var(--warn)}.api-dot.err{background:var(--dn)}.api-dot.off{background:var(--text3)}
-.api-label{color:var(--text2)}
+.api-label{color:var(--text)}
 .api-msg{margin-left:auto;font-size:10px;color:var(--text3);font-family:var(--mono)}
 .src-live{font-size:8px;padding:1px 5px;border-radius:2px;background:rgba(0,230,118,.1);color:var(--up);font-family:var(--mono)}
 .src-mock{font-size:8px;padding:1px 5px;border-radius:2px;background:rgba(61,85,112,.15);color:var(--text3);font-family:var(--mono)}
@@ -59,13 +59,13 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14
 .tabs-wrap{padding:12px 18px 0;border-bottom:1px solid var(--border);display:flex;gap:6px}
 .tab{padding:7px 18px;font-size:13px;border:1px solid var(--border);border-bottom:none;border-radius:7px 7px 0 0;cursor:pointer;background:var(--bg2);color:var(--text2);transition:all .2s;font-family:var(--sans)}
 .tab.active{background:var(--bg3);color:var(--accent);border-color:var(--border2)}
-.tc{font-size:10px;background:var(--border2);color:var(--text2);padding:1px 6px;border-radius:10px;margin-left:4px}
+.tc{font-size:10px;background:var(--border2);color:var(--text);padding:1px 6px;border-radius:10px;margin-left:4px}
 .tab.active .tc{background:rgba(0,201,232,.2);color:var(--accent)}
 
 /* ── FILTERS ── */
 .filters{padding:10px 18px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .filter-label{font-size:10px;color:var(--text3);letter-spacing:.08em;text-transform:uppercase}
-.filter-btn{font-size:11px;padding:4px 10px;border:1px solid var(--border2);border-radius:5px;background:transparent;color:var(--text2);cursor:pointer;font-family:var(--sans);transition:all .15s}
+.filter-btn{font-size:11px;padding:4px 10px;border:1px solid var(--border2);border-radius:5px;background:transparent;color:var(--text);cursor:pointer;font-family:var(--sans);transition:all .15s}
 .filter-btn.active{background:rgba(0,201,232,.1);border-color:var(--accent);color:var(--accent)}
 .filter-btn:hover{border-color:var(--border3);color:var(--text)}
 
@@ -81,7 +81,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14
 .tbl-wrap{padding:0 0 14px 0;overflow:hidden;position:relative}
 /* 桌面版正常顯示 */
 table{width:100%;border-collapse:collapse;min-width:900px}
-th{font-size:12px;color:var(--text2);letter-spacing:.04em;padding:9px 12px;text-align:right;border-bottom:1px solid var(--border);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--bg2);z-index:10}
+th{font-size:12px;color:var(--text);letter-spacing:.04em;padding:9px 12px;text-align:right;border-bottom:1px solid var(--border);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--bg2);z-index:10}
 th:first-child,td:first-child{text-align:left}
 td{padding:10px 8px;border-bottom:1px solid rgba(26,40,64,.6);vertical-align:middle;white-space:nowrap}
 tr{transition:background .12s;cursor:pointer}
@@ -118,12 +118,12 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
 .sname{display:flex;flex-direction:column;gap:3px}
 .scode{font-family:var(--mono);font-size:15px;font-weight:700}
 .sinfo{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.scname{font-size:13px;color:var(--text2)}
+.scname{font-size:13px;color:var(--text)}
 .tbadge{font-size:11px;padding:2px 7px;border-radius:4px;font-family:var(--mono)}
 .tbadge.etf{background:rgba(0,136,187,.15);color:#4fc3f7;border:1px solid rgba(0,136,187,.3)}
 .tbadge.stock{background:rgba(0,230,118,.07);color:#69f0ae;border:1px solid rgba(0,230,118,.18)}
 .tbadge.lev{background:rgba(255,171,0,.1);color:#ffd54f;border:1px solid rgba(255,171,0,.22)}
-.ibadge{font-size:11px;padding:2px 8px;border-radius:4px;background:var(--bg4);color:var(--text2);border:1px solid var(--border2)}
+.ibadge{font-size:11px;padding:2px 8px;border-radius:4px;background:var(--bg4);color:var(--text);border:1px solid var(--border2)}
 
 .pv{font-family:var(--mono);font-size:16px;font-weight:700}
 .cv{font-family:var(--mono);font-size:13px}
@@ -155,7 +155,7 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
 @keyframes fadeIn{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:scale(1)}}
 .det-hdr{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;gap:10px;flex-wrap:wrap;padding-right:32px}
 .det-h2{font-size:22px;font-weight:700;font-family:var(--mono)}
-.det-sub{font-size:13px;color:var(--text2);margin-top:4px}
+.det-sub{font-size:13px;color:var(--text);margin-top:4px}
 .det-price{font-size:28px;font-weight:700;font-family:var(--mono)}
 .det-price.up{color:var(--up)}.det-price.dn{color:var(--dn)}.det-price.neu{color:var(--text2)}
 .det-chg{font-size:14px;font-family:var(--mono)}
@@ -218,7 +218,7 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
 .key-panel{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:600;display:flex;align-items:center;justify-content:center;padding:20px}
 .key-modal{background:#0d1624;border:1px solid #243554;border-radius:16px;padding:28px;width:100%;max-width:480px}
 .key-modal h3{font-size:16px;font-weight:700;color:#dde6f0;margin-bottom:6px}
-.key-modal p{font-size:12px;color:#7a9ab8;line-height:1.7;margin-bottom:18px}
+.key-modal p{font-size:12px;color:#c0d4e8;line-height:1.7;margin-bottom:18px}
 .key-input{width:100%;background:#0a0e1a;border:1px solid #243554;border-radius:8px;color:#dde6f0;padding:10px 14px;font-family:'JetBrains Mono',monospace;font-size:13px;outline:none;transition:border .2s;margin-bottom:10px}
 .key-input:focus{border-color:#00c9e8}
 .key-status{font-size:11px;margin-bottom:14px;min-height:16px;font-family:'JetBrains Mono',monospace}
@@ -228,7 +228,7 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
 .btn-test:hover{background:rgba(0,201,232,.2)}
 .btn-save{padding:7px 18px;background:#0088bb;border:none;border-radius:6px;color:#fff;font-size:12px;cursor:pointer;font-family:var(--sans);font-weight:500}
 .btn-save:hover{background:#00a8d8}
-.btn-cancel{padding:7px 14px;background:transparent;border:1px solid #243554;border-radius:6px;color:#7a9ab8;font-size:12px;cursor:pointer;font-family:var(--sans)}
+.btn-cancel{padding:7px 14px;background:transparent;border:1px solid #243554;border-radius:6px;color:#c0d4e8;font-size:12px;cursor:pointer;font-family:var(--sans)}
 .key-indicator{display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer}
 .key-indicator:hover{color:#dde6f0}
 
@@ -285,11 +285,11 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
     <h3>🔑 API Key 設定</h3>
     <div style="display:flex;gap:6px;margin-bottom:14px">
       <button onclick="switchKeyTab('gemini')" id="kt-gemini" style="padding:5px 14px;font-size:12px;background:rgba(0,201,232,.15);border:1px solid rgba(0,201,232,.4);color:#00c9e8;border-radius:5px;cursor:pointer;font-family:var(--sans)">🤖 Gemini AI 分析</button>
-      <button onclick="switchKeyTab('finnhub')" id="kt-finnhub" style="padding:5px 14px;font-size:12px;background:transparent;border:1px solid #243554;color:#7a9ab8;border-radius:5px;cursor:pointer;font-family:var(--sans)">📈 Finnhub 股價</button>
+      <button onclick="switchKeyTab('finnhub')" id="kt-finnhub" style="padding:5px 14px;font-size:12px;background:transparent;border:1px solid #243554;color:#c0d4e8;border-radius:5px;cursor:pointer;font-family:var(--sans)">📈 Finnhub 股價</button>
     </div>
     <!-- Gemini Tab -->
     <div id="tab-gemini">
-      <p style="font-size:12px;color:#7a9ab8;line-height:1.7;margin-bottom:14px">
+      <p style="font-size:12px;color:#c0d4e8;line-height:1.7;margin-bottom:14px">
         前往 <b style="color:#00c9e8">aistudio.google.com</b> → 左側「Get API Key」→「Create API key」。<br>
         <b>免費，不需信用卡，每天 250 次以上</b>，不耗 Claude Pro 額度。
       </p>
@@ -303,7 +303,7 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
     </div>
     <!-- Finnhub Tab -->
     <div id="tab-finnhub" style="display:none">
-      <p style="font-size:12px;color:#7a9ab8;line-height:1.7;margin-bottom:14px">
+      <p style="font-size:12px;color:#c0d4e8;line-height:1.7;margin-bottom:14px">
         前往 <b style="color:#00c9e8">finnhub.io</b> → 免費註冊 → Dashboard 取得 API Key。<br>
         <b>免費，每分鐘 60 次，直接呼叫無 CORS 問題</b>，比 Yahoo Finance 更穩定。<br>
         台股格式：TWSE:1303（上市）/ TPEX:3481（上櫃）自動轉換。
@@ -328,7 +328,7 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
       <button class="btn-test" onclick="testKey()">🧪 測試連線</button>
       <button class="btn-save" onclick="saveKey()">💾 儲存並啟用</button>
     </div>
-    <div style="margin-top:14px;padding-top:12px;border-top:1px solid #1a2840;font-size:10px;color:#3d5570;line-height:1.6">
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid #1a2840;font-size:10px;color:#8aa8c8;line-height:1.6">
       ⚠ 免費版免責聲明：Google 可能使用免費方案的輸入資料來改善模型。若介意，可改用付費方案（Gemini Tier 1）。<br>
       Key 儲存後下次開啟看板時自動載入，清除瀏覽器快取會清除 Key。
     </div>
@@ -438,8 +438,26 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
 function loadStocksFromStorage() {
   try {
     const saved = localStorage.getItem('stocks_hold');
-    if (saved) return JSON.parse(saved);
-  } catch(e) {}
+    if (!saved) return null;
+    const parsed = JSON.parse(saved);
+    // 驗證格式：每筆都要有 code 和 name
+    if (!Array.isArray(parsed) || !parsed.every(s => s.code && s.name)) {
+      console.warn('stocks_hold 格式不正確，清除舊資料');
+      localStorage.removeItem('stocks_hold');
+      localStorage.removeItem('stocks_watch');
+      return null;
+    }
+    // 確保每筆都有 sector 欄位（舊資料可能沒有）
+    return parsed.map(s => ({
+      code: s.code, name: s.name,
+      type: s.type || 'stock',
+      sector: s.sector || '其他',
+      market: s.market || (s.code.endsWith('.TWO') ? 'otc' : 'tse')
+    }));
+  } catch(e) {
+    localStorage.removeItem('stocks_hold');
+    return null;
+  }
   return null;
 }
 function saveStocksToStorage() {
@@ -475,8 +493,21 @@ let watchStocks = [
 (function loadWatchFromStorage() {
   try {
     const saved = localStorage.getItem('stocks_watch');
-    if (saved) watchStocks = JSON.parse(saved);
-  } catch(e) {}
+    if (!saved) return;
+    const parsed = JSON.parse(saved);
+    if (!Array.isArray(parsed) || !parsed.every(s => s.code && s.name)) {
+      localStorage.removeItem('stocks_watch');
+      return;
+    }
+    watchStocks = parsed.map(s => ({
+      code: s.code, name: s.name,
+      type: s.type || 'stock',
+      sector: s.sector || '其他',
+      market: s.market || (s.code.endsWith('.TWO') ? 'otc' : 'tse')
+    }));
+  } catch(e) {
+    localStorage.removeItem('stocks_watch');
+  }
 })();
 
 // ── 模擬資料（API 失敗時備用）────────────────────────────
@@ -703,85 +734,114 @@ async function fetchTWSEMIS(code) {
 // ── 方法B：TWSE OpenAPI 收盤（盤後，無需Key）───────
 async function fetchTWSEClose(code) {
   if (!code.endsWith('.TW') && !code.endsWith('.TWO')) return null;
-  const no = code.replace('.TWO','').replace('.TW','');
+  const no    = code.replace('.TWO','').replace('.TW','');
+  const isOTC = code.endsWith('.TWO');
+
+  // 民國年日期（TPEx 用民國年）
+  const tw = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
+  const rocY  = tw.getFullYear() - 1911;
+  const mm    = String(tw.getMonth()+1).padStart(2,'0');
+  const dd    = String(tw.getDate()).padStart(2,'0');
+  const yyyymm = tw.getFullYear()+String(tw.getMonth()+1).padStart(2,'0');
+
+  // 解析輔助函數
+  const parseClose = row => {
+    if (!row) return 0;
+    return Array.isArray(row)
+      ? parseFloat((row[6]||'0').replace(/,/g,''))
+      : parseFloat(row.ClosingPrice||row['收盤價']||row.close||row.ClosePrice||0);
+  };
+  const parseVol = row => {
+    if (!row) return 0;
+    return Array.isArray(row)
+      ? Math.round(parseFloat((row[1]||'0').replace(/,/g,''))/1000)
+      : Math.round(parseFloat(row.TradeVolume||row['成交股數']||row.Volume||0)/1000);
+  };
+  const parseHigh = row => !row ? 0 : Array.isArray(row)
+    ? parseFloat((row[4]||'0').replace(/,/g,''))
+    : parseFloat(row.HighestPrice||row['最高價']||row.HighPrice||0);
+  const parseLow = row => !row ? 0 : Array.isArray(row)
+    ? parseFloat((row[5]||'0').replace(/,/g,''))
+    : parseFloat(row.LowestPrice||row['最低價']||row.LowPrice||0);
+
   try {
-    // 嘗試上市
-    // 用當月日線資料（含精確收盤與昨收）
-  const yyyymm = getTodayStr().slice(0,6);
-  const urls = [
-      // 主要：當月 STOCK_DAY（有完整 OHLCV）
-      `https://corsproxy.io/?${encodeURIComponent(`https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymm}01&stockNo=${no}`)}`,
-      // 備援：STOCK_DAY_AVG
-      `https://corsproxy.io/?${encodeURIComponent(`https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_AVG?stockNo=${no}`)}`,
-      // 第二備援：allorigins
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymm}01&stockNo=${no}`)}`,
-    ];
+    let urls;
+    if (isOTC) {
+      // 上櫃：TPEx dailyQuotes（全市場，需過濾個股）
+      // 格式：date=YYYY/MM/DD
+      const dateStr = `${tw.getFullYear()}/${mm}/${dd}`;
+      const prevDate = (() => {
+        const d2 = new Date(tw); d2.setDate(d2.getDate()-1);
+        // 往前找最近的工作日
+        while(d2.getDay()===0||d2.getDay()===6) d2.setDate(d2.getDate()-1);
+        return `${d2.getFullYear()}/${String(d2.getMonth()+1).padStart(2,'0')}/${String(d2.getDate()).padStart(2,'0')}`;
+      })();
+      // 嘗試今日，若無資料嘗試昨日
+      urls = [
+        `https://corsproxy.io/?${encodeURIComponent('https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?response=json&date='+dateStr)}`,
+        `https://corsproxy.io/?${encodeURIComponent('https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?response=json&date='+prevDate)}`,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent('https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?response=json&date='+prevDate)}`,
+      ];
+    } else {
+      // 上市：TWSE STOCK_DAY（個股當月）
+      urls = [
+        `https://corsproxy.io/?${encodeURIComponent(`https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymm}01&stockNo=${no}`)}`,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymm}01&stockNo=${no}`)}`,
+        `https://corsproxy.io/?${encodeURIComponent(`https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_AVG?stockNo=${no}`)}`,
+      ];
+    }
+
     for (const url of urls) {
       try {
-        const r = await fetch(url, {signal: AbortSignal.timeout(8000)});
+        const r = await fetch(url, {signal: AbortSignal.timeout(10000)});
         if (!r.ok) continue;
         const raw = await r.json();
-        // 處理兩種格式：STOCK_DAY (有 stat+data) 或 OpenAPI (直接陣列)
-        let arr;
-        if (raw.stat && raw.data) {
-          arr = raw.data;  // STOCK_DAY 格式
-        } else if (Array.isArray(raw)) {
-          arr = raw;       // OpenAPI 陣列格式
+
+        let price, prev, high, low, vol;
+
+        if (isOTC) {
+          // TPEx dailyQuotes 格式：aaData 陣列，每筆是 [代號,名稱,收盤,漲跌,開盤,最高,最低,量,...]
+          const rows = raw.aaData || raw.tables?.[0]?.data || [];
+          const row  = rows.find(r => r[0] === no || r[0]?.trim() === no);
+          if (!row) { addLog('warn',`TPEx 找不到 ${no}`); continue; }
+          price = parseFloat((row[2]||'0').replace(/,/g,''));   // 收盤
+          high  = parseFloat((row[5]||'0').replace(/,/g,''));   // 最高
+          low   = parseFloat((row[6]||'0').replace(/,/g,''));   // 最低
+          vol   = Math.round(parseFloat((row[7]||'0').replace(/,/g,''))/1000); // 量
+          // 昨收 = 今日收盤（本日資料中的收盤就是今日/昨日收盤）
+          prev  = price;
+          // 用漲跌計算前天收盤
+          const chgStr = (row[3]||'').replace(/,/g,'').replace(/[+]/g,'');
+          const chgVal = parseFloat(chgStr) || null;
+          prev = chgVal !== null ? +(price - chgVal).toFixed(2) : price;
         } else {
-          continue;
+          // TWSE STOCK_DAY 格式
+          const rows2 = raw.data || (Array.isArray(raw) ? raw : null);
+          if (!rows2 || !rows2.length) continue;
+          const latest  = rows2[rows2.length-1];
+          const prevDay = rows2.length >= 2 ? rows2[rows2.length-2] : null;
+          price = parseClose(latest);
+          prev  = prevDay ? parseClose(prevDay) : null;
+          high  = parseHigh(latest) || price;
+          low   = parseLow(latest)  || price;
+          vol   = parseVol(latest);
+          // 更新 SPARK（上市才有月線陣列）
+          if (rows2 && rows2.length >= 5) {
+            SPARK[code] = rows2.slice(-5).map(r => parseClose(r)).filter(v => v > 0);
+          }
         }
-        if (!arr||!arr.length) continue;
-        const latest  = arr[arr.length - 1];   // 最新交易日（昨天）
-        const prevDay = arr.length >= 2 ? arr[arr.length - 2] : null; // 前天
 
-        // 解析收盤價（支援 STOCK_DAY 陣列格式 和 OpenAPI 物件格式）
-        const parseClose = row => {
-          if (!row) return 0;
-          return Array.isArray(row)
-            ? parseFloat((row[6]||'0').replace(/,/g,''))   // 陣列格式：index 6 = 收盤
-            : parseFloat(row.ClosingPrice||row['收盤價']||row.close||0);
-        };
-        const parseVol = row => {
-          if (!row) return 0;
-          return Array.isArray(row)
-            ? Math.round(parseFloat((row[1]||'0').replace(/,/g,''))/1000)
-            : Math.round(parseFloat(row.TradeVolume||row['成交股數']||0)/1000);
-        };
-        const parseHigh = row => Array.isArray(row)
-          ? parseFloat((row[4]||'0').replace(/,/g,''))
-          : parseFloat(row.HighestPrice||row['最高價']||0);
-        const parseLow = row => Array.isArray(row)
-          ? parseFloat((row[5]||'0').replace(/,/g,''))
-          : parseFloat(row.LowestPrice||row['最低價']||0);
-
-        // price = 昨天收盤（盤後顯示用）
-        // prev  = 前天收盤（用來計算昨天的漲跌幅）
-        const price = parseClose(latest);
-        const prev  = prevDay ? parseClose(prevDay) : null;
-        const high  = parseHigh(latest) || price;
-        const low   = parseLow(latest)  || price;
-        const vol   = parseVol(latest);
-        // chg/pct = 昨天相對前天的漲跌（盤後模式下的正確呈現）
+        if (!price || price === 0) continue;
         const chg = (prev && prev > 0) ? +(price - prev).toFixed(2) : null;
-        const pct = (prev && prev > 0 && chg !== null) ? +(chg / prev * 100).toFixed(2) : null;
-        if (!price||price===0) continue;
-        // 用真實收盤序列更新近5日走勢
-        if (arr.length >= 5) {
-          SPARK[code] = arr.slice(-5).map(r => parseClose(r)).filter(v => v > 0);
-        }
-        return {price, chg, pct, prev, vol, high, low, src:'twse'};
-      } catch(e2) { continue; }
+        const pct = (prev && prev > 0 && chg !== null) ? +(chg/prev*100).toFixed(2) : null;
+        return {price, chg, pct, prev: prev||null, vol, high, low, src:'twse'};
+      } catch(e) { addLog('warn',`fetchTWSEClose ${code}: ${e.message}`); }
     }
-    return null;
-  } catch(e) { return null; }
+  } catch(e) {}
+  return null;
 }
 
-function getTodayStr() {
-  const d = new Date();
-  return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
-}
 
-// ── 方法C：Finnhub（美股用，台股免費版不支援）───────
 // ══════════════════════════════════════════════════════════
 // 三大法人真實資料（TWSE T86 + TPEx）
 // ══════════════════════════════════════════════════════════
@@ -802,12 +862,12 @@ async function fetchTWSEInst(dateStr) {
     if (j.stat !== 'OK' || !j.data) return {};
     const result = {};
     j.data.forEach(row => {
-      const no  = row[0]?.trim();
+      const no  = (row[0]||'').trim();
       const f   = parseInt((row[4]||'0').replace(/,/g,''))||0;
       const i   = parseInt((row[7]||'0').replace(/,/g,''))||0;
-      const d   = parseInt((row[10]||'0').replace(/,/g,''))||0;
+      const d2  = parseInt((row[10]||'0').replace(/,/g,''))||0;
       const net = parseInt((row[11]||'0').replace(/,/g,''))||0;
-      if (no) result[no] = {f, i, d, net, src:'twse'};
+      if (no) result[no] = {f, i, d:d2, net, src:'twse'};
     });
     addLog('ok', 'TWSE三大法人：'+Object.keys(result).length+' 筆');
     return result;
@@ -825,10 +885,10 @@ async function fetchTPExInst(dateStr) {
     const rows = j.tables?.[0]?.data || j.aaData || [];
     const result = {};
     rows.forEach(row => {
-      const no = row[0]?.trim();
+      const no = (row[0]||'').trim();
       const clean = s => parseInt((s||'0').replace(/,/g,'').replace(/[+]/g,''))||0;
-      const f=clean(row[4]), i=clean(row[7]), d=clean(row[10]), net=clean(row[11]);
-      if (no) result[no] = {f, i, d, net, src:'tpex'};
+      const f=clean(row[4]), i=clean(row[7]), d2=clean(row[10]), net=clean(row[11]);
+      if (no) result[no] = {f, i, d:d2, net, src:'tpex'};
     });
     addLog('ok', 'TPEx三大法人：'+Object.keys(result).length+' 筆');
     return result;
@@ -837,8 +897,11 @@ async function fetchTPExInst(dateStr) {
 
 async function fetchInstitutional() {
   const today = getTodayDateStr();
-  if (instCache.date === today && Object.keys(instCache.data||{}).length > 0) return instCache.data;
-  addLog('info', '抓取三大法人（'+today+'）…');
+  if (instCache.date === today && Object.keys(instCache.data||{}).length > 0) {
+    addLog('info','三大法人使用快取');
+    return instCache.data;
+  }
+  addLog('info','抓取三大法人（'+today+'）…');
   const [twse, tpex] = await Promise.all([fetchTWSEInst(today), fetchTPExInst(today)]);
   const merged = {...twse, ...tpex};
   if (Object.keys(merged).length > 0) {
@@ -954,11 +1017,15 @@ async function fetchPrevClose(code) {
     }
   } catch(e) {}
 
-  // ── 嘗試2：TWSE STOCK_DAY 當月（倒數第2筆）──
+  // ── 嘗試2：TWSE/TPEx STOCK_DAY 收盤（最新一筆）──
   try {
-    const yyyymm = getTodayStr().slice(0,6);
+    const tw2   = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
+    const yyyymm = tw2.getFullYear()+String(tw2.getMonth()+1).padStart(2,'0');
+    const mm2   = String(tw2.getMonth()+1).padStart(2,'0');
+    const dd2   = String(tw2.getDate()).padStart(2,'0');
+    const dateTPEx = `${tw2.getFullYear()}/${mm2}/${dd2}`;
     const base = isOTC
-      ? `https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock/result?date=${yyyymm.slice(0,4)}/${yyyymm.slice(4,6)}/01&stockCode=${no}&response=json`
+      ? `https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?response=json&date=${dateTPEx}`
       : `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymm}01&stockNo=${no}`;
     for (const pfn of [
       u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
@@ -1396,7 +1463,7 @@ async function showTechDetail(code, name) {
       <button onclick="document.getElementById('tech-detail-overlay').remove()" style="margin-left:auto;background:rgba(61,85,112,.2);border:1px solid #3d5570;color:#8ba4c0;font-size:14px;cursor:pointer;padding:3px 12px;border-radius:5px">✕ 關閉</button>
     </div>
     <div id="tech-detail-body" style="padding:20px">
-      <div style="display:flex;align-items:center;gap:8px;color:#3d5570;font-size:13px">
+      <div style="display:flex;align-items:center;gap:8px;color:#8aa8c8;font-size:13px">
         <div style="width:6px;height:6px;border-radius:50%;background:#00c9e8;animation:blink 1s infinite"></div>
         正在從 TWSE 抓取近3個月日線資料，計算技術指標…
       </div>
@@ -1416,9 +1483,9 @@ async function showTechDetail(code, name) {
   const {macd, kd, rsi, bb, closes, dates, vols} = ind;
 
   // 顏色輔助
-  const c = (val, up='#00e676', dn='#ff4f4f', neu='#7a9ab8') =>
+  const c = (val, up='#00e676', dn='#ff4f4f', neu='#c0d4e8') =>
     val > 0 ? up : val < 0 ? dn : neu;
-  const zc = zone => zone.includes('超買')||zone.includes('偏強')?'#00e676':zone.includes('超賣')||zone.includes('偏弱')?'#ff4f4f':'#7a9ab8';
+  const zc = zone => zone.includes('超買')||zone.includes('偏強')?'#00e676':zone.includes('超賣')||zone.includes('偏弱')?'#ff4f4f':'#c0d4e8';
 
   // 迷你折線圖 SVG（收盤價近20日）
   const mn=Math.min(...closes), mx=Math.max(...closes), r=mx-mn||1;
@@ -1442,16 +1509,16 @@ async function showTechDetail(code, name) {
 
   const row = (label, value, valueColor='#dde6f0', note='') => `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(26,40,64,.5)">
-      <span style="font-size:12px;color:#7a9ab8">${label}</span>
-      <span style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;color:${valueColor}">${value}${note?`<span style="font-size:10px;color:#3d5570;margin-left:5px">${note}</span>`:''}</span>
+      <span style="font-size:12px;color:#c0d4e8">${label}</span>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;color:${valueColor}">${value}${note?`<span style="font-size:10px;color:#8aa8c8;margin-left:5px">${note}</span>`:''}</span>
     </div>`;
 
   body.innerHTML = `
     <!-- 近20日走勢 -->
     <div style="background:#111827;border:1px solid #1a2840;border-radius:10px;padding:14px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:16px">
       <div>
-        <div style="font-size:11px;color:#3d5570;margin-bottom:4px">近20日收盤走勢　最新：${closes[closes.length-1]} 元</div>
-        <div style="font-size:10px;color:#3d5570">${dates[0]} ～ ${dates[dates.length-1]}</div>
+        <div style="font-size:11px;color:#8aa8c8;margin-bottom:4px">近20日收盤走勢　最新：${closes[closes.length-1]} 元</div>
+        <div style="font-size:10px;color:#8aa8c8">${dates[0]} ～ ${dates[dates.length-1]}</div>
       </div>
       ${miniChart}
     </div>
@@ -1465,10 +1532,10 @@ async function showTechDetail(code, name) {
       ${row('MACD柱狀', macd.bar, c(macd.bar))}
       ${row('趨勢', macd.dif>macd.dea?'多頭排列':'空頭排列', macd.dif>macd.dea?'#00e676':'#ff4f4f')}
       ${macd.cross?row('交叉訊號', macd.cross, macd.cross.includes('黃金')?'#00e676':'#ff4f4f'):''}
-      <div style="margin-top:8px;font-size:11px;color:#7a9ab8;line-height:1.6">
+      <div style="margin-top:8px;font-size:11px;color:#c0d4e8;line-height:1.6">
         DIF>DEA且柱狀為正→多方強勢<br>DIF<DEA且柱狀為負→空方主導
       </div>
-    `) : card('📊 MACD', '#00c9e8', '<div style="color:#3d5570;font-size:12px">資料不足</div>')}
+    `) : card('📊 MACD', '#00c9e8', '<div style="color:#8aa8c8;font-size:12px">資料不足</div>')}
 
     <!-- KD -->
     ${kd ? card('📈 KD 隨機指標（9,3,3）', '#ffab00', `
@@ -1477,42 +1544,42 @@ async function showTechDetail(code, name) {
       ${row('位置', kd.zone, zc(kd.zone))}
       ${row('趨勢方向', kd.k>kd.d?'K值在上（偏多）':'K值在下（偏空）', kd.k>kd.d?'#00e676':'#ff4f4f')}
       ${kd.cross?row('交叉', kd.cross, kd.cross.includes('黃金')?'#00e676':'#ff4f4f'):''}
-      <div style="margin-top:8px;font-size:11px;color:#7a9ab8;line-height:1.6">
+      <div style="margin-top:8px;font-size:11px;color:#c0d4e8;line-height:1.6">
         K>80超買留意回調；K<20超賣留意反彈<br>K向上穿越D→黃金交叉買訊
       </div>
-    `) : card('📈 KD', '#ffab00', '<div style="color:#3d5570;font-size:12px">資料不足</div>')}
+    `) : card('📈 KD', '#ffab00', '<div style="color:#8aa8c8;font-size:12px">資料不足</div>')}
 
     <!-- RSI -->
     ${rsi ? card('🔴 RSI 相對強弱（14日）', '#ff6b9d', `
       ${row('RSI 值', rsi.value, rsi.value>=70?'#ff4f4f':rsi.value<=30?'#00e676':'#dde6f0')}
       ${row('強弱區間', rsi.zone, zc(rsi.zone))}
-      ${row('操作提示', rsi.signal, rsi.signal==='注意回調'?'#ff4f4f':rsi.signal==='留意反彈'?'#00e676':'#7a9ab8')}
+      ${row('操作提示', rsi.signal, rsi.signal==='注意回調'?'#ff4f4f':rsi.signal==='留意反彈'?'#00e676':'#c0d4e8')}
       <div style="margin-top:8px;padding:6px 8px;background:rgba(255,107,157,.06);border-radius:6px">
-        <div style="font-size:11px;color:#7a9ab8;line-height:1.6">
+        <div style="font-size:11px;color:#c0d4e8;line-height:1.6">
           RSI>70 超買（${rsi.value>=70?'⚠ 目前在此區間':'未達'} ）<br>
           RSI<30 超賣（${rsi.value<=30?'⚠ 目前在此區間':'未達'}）<br>
           RSI=50 多空分界線
         </div>
       </div>
-    `) : card('🔴 RSI', '#ff6b9d', '<div style="color:#3d5570;font-size:12px">資料不足</div>')}
+    `) : card('🔴 RSI', '#ff6b9d', '<div style="color:#8aa8c8;font-size:12px">資料不足</div>')}
 
     <!-- 布林通道 -->
     ${bb ? card('📉 布林通道（20日, 2σ）', '#a78bfa', `
       ${row('上軌 Upper', bb.upper, '#ff8a80')}
-      ${row('中軌 Middle', bb.mid,   '#7a9ab8')}
+      ${row('中軌 Middle', bb.mid,   '#c0d4e8')}
       ${row('下軌 Lower', bb.lower, '#69f0ae')}
       ${row('%B 位置', bb.pb+'%', bb.pb>=90?'#ff4f4f':bb.pb<=10?'#00e676':'#dde6f0', '(0%=下軌,100%=上軌)')}
       ${row('帶寬', bb.bw+'%', '#dde6f0')}
-      ${row('位置判斷', bb.pos, bb.pos.includes('上軌')?'#ff4f4f':bb.pos.includes('下軌')?'#00e676':'#7a9ab8')}
-      ${row('帶寬狀態', bb.squeeze, bb.squeeze.includes('收縮')?'#ffab00':'#7a9ab8')}
-      <div style="margin-top:8px;font-size:11px;color:#7a9ab8;line-height:1.6">
+      ${row('位置判斷', bb.pos, bb.pos.includes('上軌')?'#ff4f4f':bb.pos.includes('下軌')?'#00e676':'#c0d4e8')}
+      ${row('帶寬狀態', bb.squeeze, bb.squeeze.includes('收縮')?'#ffab00':'#c0d4e8')}
+      <div style="margin-top:8px;font-size:11px;color:#c0d4e8;line-height:1.6">
         帶寬收縮後常有大波動；%B>100突破上軌為強勢
       </div>
-    `) : card('📉 布林通道', '#a78bfa', '<div style="color:#3d5570;font-size:12px">資料不足</div>')}
+    `) : card('📉 布林通道', '#a78bfa', '<div style="color:#8aa8c8;font-size:12px">資料不足</div>')}
 
     </div>
 
-    <div style="margin-top:12px;padding:10px 14px;background:rgba(0,0,0,.3);border-radius:8px;font-size:10px;color:#3d5570;line-height:1.7">
+    <div style="margin-top:12px;padding:10px 14px;background:rgba(0,0,0,.3);border-radius:8px;font-size:10px;color:#8aa8c8;line-height:1.7">
       ⚠ 資料來源：TWSE/TPEx 歷史日線（近3個月）。技術指標為數學計算，僅供參考，不構成投資建議。
     </div>`;
 }
@@ -1600,6 +1667,7 @@ function renderTable() {
   let upC=0, dnC=0, topSc=0, topNm='', bestPct=-Infinity, worstPct=Infinity, bestNm='', worstNm='';
 
   stocks.forEach(stock => {
+   try {
     const pd   = priceData[stock.code];
     const price= pd?.price ?? null;
     const chg  = pd?.chg   ?? null;
@@ -1681,7 +1749,7 @@ function renderTable() {
             <span class="tbadge ${stock.type}">${tbadge}</span>
             <span class="ibadge">${stock.sector}</span>
           </div>
-          ${prevClose ? `<div style="font-size:11px;color:var(--text2);font-family:var(--mono);margin-top:2px">昨收 ${fmt(prevClose,2)}<span style="font-size:9px;color:var(--text3);margin-left:3px">${prevSrc==="est"?"(估)":""}</span></div>` : ''}
+          ${prevClose ? `<div style="font-size:11px;color:var(--text);font-family:var(--mono);margin-top:2px">昨收 ${fmt(prevClose,2)}<span style="font-size:9px;color:var(--text3);margin-left:3px">${prevSrc==="est"?"(估)":""}</span></div>` : ''}
         </div>
       </td>
       <td style="text-align:right" onclick="selStk('${stock.code}')">${priceCell}</td>
@@ -1707,6 +1775,9 @@ function renderTable() {
       </td>` : ''}
     `;
     tbody.appendChild(tr);
+   } catch(err) {
+     console.error('renderTable 個股渲染錯誤:', stock?.code, err.message);
+   }
   });
 
   // 更新 metrics
@@ -1850,10 +1921,10 @@ function switchKeyTab(tab) {
   document.getElementById('tab-finnhub').style.display = tab==='finnhub'?'block':'none';
   document.getElementById('kt-gemini').style.background  = tab==='gemini'?'rgba(0,201,232,.15)':'transparent';
   document.getElementById('kt-gemini').style.borderColor  = tab==='gemini'?'rgba(0,201,232,.4)':'#243554';
-  document.getElementById('kt-gemini').style.color  = tab==='gemini'?'#00c9e8':'#7a9ab8';
+  document.getElementById('kt-gemini').style.color  = tab==='gemini'?'#00c9e8':'#c0d4e8';
   document.getElementById('kt-finnhub').style.background = tab==='finnhub'?'rgba(0,201,232,.15)':'transparent';
   document.getElementById('kt-finnhub').style.borderColor = tab==='finnhub'?'rgba(0,201,232,.4)':'#243554';
-  document.getElementById('kt-finnhub').style.color = tab==='finnhub'?'#00c9e8':'#7a9ab8';
+  document.getElementById('kt-finnhub').style.color = tab==='finnhub'?'#00c9e8':'#c0d4e8';
   if (tab==='finnhub') document.getElementById('finnhub-key-input').value = finnhubKey;
 }
 
@@ -1987,12 +2058,13 @@ ${modeInstr}
 
   // ── 呼叫 Gemini API ──
   const body = document.getElementById('ai-artifact-body');
+  if (!body) { console.error('AI body element not found'); return; }
 
   if (!geminiKey) {
     // 沒有 Key：顯示提示並用模擬分析
     body.innerHTML = `<div style="background:rgba(255,171,0,.08);border:1px solid rgba(255,171,0,.2);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:#ffab00">
       ⚠ 尚未設定 Gemini API Key。<br>
-      <span style="color:#7a9ab8">點右上角「AI 未設定」按鈕設定，即可使用真實 AI 分析。現在顯示模擬分析。</span>
+      <span style="color:#c0d4e8">點右上角「AI 未設定」按鈕設定，即可使用真實 AI 分析。現在顯示模擬分析。</span>
     </div>`;
     setTimeout(() => { runMockAnalysis(code, stock, pd, sc, modeStr); }, 800);
     return;
@@ -2024,7 +2096,7 @@ ${modeInstr}
     setDot('dot-ai', 'ok');
   } catch(e) {
     body.innerHTML = `<div style="color:#ff8a80;font-size:12px">⚠ Gemini API 錯誤：${e.message}</div>
-      <div style="color:#3d5570;font-size:11px;margin-top:8px">
+      <div style="color:#8aa8c8;font-size:11px;margin-top:8px">
         請點右上角「Gemini AI ✓」重新測試 Key 是否有效。<br>
         改用模擬分析顯示中…
       </div>`;
@@ -2046,7 +2118,7 @@ function runMockAnalysis(code, stock, pd, sc, modeStr) {
     const modeStr = currentMode === 'before' ? '盤前' : '盤後';
     const sc2 = calcScore(stock, pd);
     const actionLabel = sc2.cls==='buy'?'買進':sc2.cls==='hold'?'繼續持有':sc2.cls==='sell'?'考慮賣出':'中性觀察';
-    const actionColor = sc2.cls==='buy'?'#00e676':sc2.cls==='hold'?'#ffab00':sc2.cls==='sell'?'#ff4f4f':'#7a9ab8';
+    const actionColor = sc2.cls==='buy'?'#00e676':sc2.cls==='hold'?'#ffab00':sc2.cls==='sell'?'#ff4f4f':'#c0d4e8';
 
     const section = (title, content) =>
       `<div style="margin-top:16px;margin-bottom:6px;padding:6px 12px;background:rgba(0,201,232,.08);border-left:3px solid #00c9e8;border-radius:0 6px 6px 0;font-weight:600;color:#7ac8e8;font-size:13px">${title}</div>
@@ -2130,13 +2202,13 @@ function runMockAnalysis(code, stock, pd, sc, modeStr) {
         html += section('法人買賣超（' + (instDate||'') + '）',
           '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px">' +
           '<div style="text-align:center;background:rgba(0,0,0,.2);border-radius:6px;padding:8px">' +
-            '<div style="font-size:10px;color:#3d5570;margin-bottom:3px">外資</div>' +
+            '<div style="font-size:10px;color:#8aa8c8;margin-bottom:3px">外資</div>' +
             '<div style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:600;color:' + (instF>=0?'#00e676':'#ff4f4f') + '">' + (instF>=0?'+':'') + (instF||0).toLocaleString() + '</div></div>' +
           '<div style="text-align:center;background:rgba(0,0,0,.2);border-radius:6px;padding:8px">' +
-            '<div style="font-size:10px;color:#3d5570;margin-bottom:3px">投信</div>' +
+            '<div style="font-size:10px;color:#8aa8c8;margin-bottom:3px">投信</div>' +
             '<div style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:600;color:' + (instI>=0?'#00e676':'#ff4f4f') + '">' + (instI>=0?'+':'') + (instI||0).toLocaleString() + '</div></div>' +
           '<div style="text-align:center;background:rgba(0,0,0,.2);border-radius:6px;padding:8px">' +
-            '<div style="font-size:10px;color:#3d5570;margin-bottom:3px">自營商</div>' +
+            '<div style="font-size:10px;color:#8aa8c8;margin-bottom:3px">自營商</div>' +
             '<div style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:600;color:' + (instD>=0?'#00e676':'#ff4f4f') + '">' + (instD>=0?'+':'') + (instD||0).toLocaleString() + '</div></div>' +
           '<div style="text-align:center;background:rgba(0,0,0,.2);border-radius:6px;padding:8px;border:1px solid rgba(0,201,232,.2)">' +
             '<div style="font-size:10px;color:#00c9e8;margin-bottom:3px">三大合計</div>' +
@@ -2145,12 +2217,12 @@ function runMockAnalysis(code, stock, pd, sc, modeStr) {
           instDesc + (stock?.sector?.includes('ETF')?' ETF法人數據反映機構配置需求。':' 建議搭配外資期貨部位一併判斷。'));
       } else {
         html += section('法人買賣超',
-          '<div style="color:#3d5570;font-size:12px">尚未取得資料，請點「↻ 抓取報價」後再執行分析</div>');
+          '<div style="color:#8aa8c8;font-size:12px">尚未取得資料，請點「↻ 抓取報價」後再執行分析</div>');
       }
 
       html += section('財務數據評估',
         `${fin2.eps_ly?`去年全年 EPS ${fin2.eps_ly} 元，今年累積 EPS ${fin2.eps_ytd>0?'+':''}${fin2.eps_ytd??'—'} 元。`:'ETF 不適用 EPS 評估。'}
-         ${fin2.gm?`毛利率 ${fin2.gm}%（${fin2.gm>=30?'優良':'普通'}），${fin2.rev_yoy?`最新月營收年增率 ${fin2.rev_yoy>0?'+':''}${fin2.rev_yoy}%，${fin2.rev_yoy>0?'營收動能正向':'營收衰退，需觀察後續'}。`:''}`:''} <span style='color:#3d5570;font-size:11px'>（以上財務數據為模擬示範，請以實際財報核對）</span>`);
+         ${fin2.gm?`毛利率 ${fin2.gm}%（${fin2.gm>=30?'優良':'普通'}），${fin2.rev_yoy?`最新月營收年增率 ${fin2.rev_yoy>0?'+':''}${fin2.rev_yoy}%，${fin2.rev_yoy>0?'營收動能正向':'營收衰退，需觀察後續'}。`:''}`:''} <span style='color:#8aa8c8;font-size:11px'>（以上財務數據為模擬示範，請以實際財報核對）</span>`);
     }
 
     html += section('明日操作策略',
@@ -2170,7 +2242,7 @@ function runMockAnalysis(code, stock, pd, sc, modeStr) {
     html += `<div style="margin-top:14px;padding-top:10px;border-top:1px solid #1a2840;display:flex;gap:6px;flex-wrap:wrap">
       ${sigs.map(s=>`<span style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid rgba(0,201,232,.2);color:#00c9e8;background:rgba(0,201,232,.06)">${s}</span>`).join('')}
       <span style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid rgba(255,171,0,.2);color:#ffab00;background:rgba(255,171,0,.06)">評分 ${sc2.score}/100</span>
-      <span style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid rgba(61,85,112,.3);color:#7a9ab8;background:rgba(61,85,112,.1)">模擬分析</span>
+      <span style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid rgba(61,85,112,.3);color:#c0d4e8;background:rgba(61,85,112,.1)">模擬分析</span>
     </div>`;
 
     body.innerHTML = html;
