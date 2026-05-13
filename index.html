@@ -996,26 +996,50 @@ async function fetchPrevClose(code) {
   const no    = code.replace('.TWO','').replace('.TW','');
   const isOTC = code.endsWith('.TWO');
   const isTW  = code.endsWith('.TW') || code.endsWith('.TWO');
-  if (!isTW) return null;  // 美股不處理
+  if (!isTW) return null;
 
-  // ── 嘗試1：TWSE MIS 即時 y 欄位（盤中最準）──
+  // ── 嘗試0：Yahoo Finance regularMarketPreviousClose（最可靠，上市上櫃都適用）──
   try {
-    const misCode = toMISCode(code);
-    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${misCode}&json=1&delay=0`;
+    const yahooCode = isOTC ? no+'.TWO' : no+'.TW';
     for (const pfn of [
       u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
       u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+      u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
     ]) {
       try {
-        const r = await fetch(pfn(url), {signal: AbortSignal.timeout(6000)});
+        const yurl = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooCode}?interval=1d&range=2d`;
+        const r = await fetch(pfn(yurl), {signal: AbortSignal.timeout(8000)});
         if (!r.ok) continue;
         const j = await r.json();
-        const d = j?.msgArray?.[0];
-        const y = parseFloat(d?.y);
-        if (y > 0) { addLog('ok', `昨收[MIS] ${code}: ${y}`); return y; }
+        const meta = j?.chart?.result?.[0]?.meta;
+        const rmp = parseFloat(meta?.regularMarketPreviousClose);
+        if (rmp > 0) { addLog('ok', `昨收[Yahoo-rmp] ${code}: ${rmp}`); return rmp; }
+        const cpc = parseFloat(meta?.chartPreviousClose);
+        if (cpc > 0) { addLog('ok', `昨收[Yahoo-cpc] ${code}: ${cpc}`); return cpc; }
       } catch(e) {}
     }
   } catch(e) {}
+
+  // ── 嘗試1：TWSE MIS 即時 y 欄位（上市盤中用）──
+  if (!isOTC) {
+    try {
+      const misCode = toMISCode(code);
+      const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${misCode}&json=1&delay=0`;
+      for (const pfn of [
+        u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+        u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+      ]) {
+        try {
+          const r = await fetch(pfn(url), {signal: AbortSignal.timeout(6000)});
+          if (!r.ok) continue;
+          const j = await r.json();
+          const d = j?.msgArray?.[0];
+          const y = parseFloat(d?.y);
+          if (y > 0) { addLog('ok', `昨收[MIS] ${code}: ${y}`); return y; }
+        } catch(e) {}
+      }
+    } catch(e) {}
+  }
 
   // ── 嘗試2：TWSE/TPEx STOCK_DAY 收盤（最新一筆）──
   try {
@@ -2056,6 +2080,48 @@ ${modeInstr}
 
 最後必須明確給出：「建議動作：買進/持有/觀察/賣出」並說明理由和停損點。`;
 
+  // ── 建立 Artifact 視窗 ──
+  // 移除舊視窗
+  const old = document.getElementById('ai-artifact-overlay');
+  if (old) old.remove();
+
+  const src2 = priceData[code]?.src;
+  const srcLabel2 = src2==='twse-mis'?'TWSE即時':src2==='twse'?'TWSE收盤':src2==='finnhub'?'Finnhub':'Yahoo Finance（15分鐘延遲）';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'ai-artifact-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:600;display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.onclick = e => { if(e.target===overlay) overlay.remove(); };
+  overlay.innerHTML = `
+  <div style="background:#0d1624;border:1px solid #243554;border-radius:16px;width:100%;max-width:720px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden">
+    <div style="padding:16px 20px;border-bottom:1px solid #1a2840;display:flex;align-items:center;gap:12px;flex-shrink:0">
+      <div style="width:28px;height:28px;background:linear-gradient(135deg,#00c9e8,#0088bb);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#000">AI</div>
+      <div>
+        <div style="font-size:15px;font-weight:700;color:#ffffff;font-family:'JetBrains Mono',monospace">${code.replace('.TWO','').replace('.TW','')} ${name}</div>
+        <div style="font-size:11px;color:#c0d4e8;margin-top:1px">${sector||stock?.sector||''} ｜ <span style="color:${modeColor};font-weight:600">${modeStr}分析</span> ｜ ${srcLabel2}</div>
+      </div>
+      <button onclick="document.getElementById('ai-artifact-overlay').remove()" style="margin-left:auto;background:rgba(61,85,112,.3);border:1px solid #3d5570;color:#c0d4e8;font-size:13px;cursor:pointer;padding:4px 14px;border-radius:5px;line-height:1.5">✕ 關閉</button>
+    </div>
+    <div style="padding:10px 20px;background:#111827;border-bottom:1px solid #1a2840;display:flex;gap:16px;flex-wrap:wrap;flex-shrink:0">
+      <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:${pd?.pct!=null?(pd.pct>=0?'#00e676':'#ff4f4f'):'#c0d4e8'}">${pd?fmt(pd.price,2):'—'} ${pd?.pct!=null?'('+fmtP(pd.pct)+')':''}</span>
+      <span style="font-size:11px;color:#c0d4e8">量 ${pd?fmt(pd.vol,0)+'張':'—'}</span>
+      <span style="font-size:11px;color:#c0d4e8">區間 ${pd?pd.low+'～'+pd.high:'—'}</span>
+      <span style="font-size:11px;color:#c0d4e8">評分 <b style="color:${sc.score>=70?'#00e676':sc.score>=50?'#ffab00':'#ff4f4f'}">${sc.score}</b>/100</span>
+    </div>
+    <div id="ai-artifact-body" style="padding:20px;overflow-y:auto;flex:1;font-size:13px;line-height:1.85;color:#c0d4e8">
+      <div style="display:flex;align-items:center;gap:8px;color:#8aa8c8;font-size:12px">
+        <div style="width:6px;height:6px;border-radius:50%;background:#00c9e8;animation:blink 1s infinite"></div>
+        Claude 正在生成${modeStr}分析報告，請稍候…
+      </div>
+    </div>
+    <div style="padding:10px 20px;border-top:1px solid #1a2840;font-size:10px;color:#8aa8c8;flex-shrink:0;display:flex;justify-content:space-between;align-items:center">
+      <span>⚠ 分析僅供參考，投資請自行判斷風險</span>
+      <button onclick="document.getElementById('ai-artifact-overlay').remove()" style="font-size:11px;padding:4px 14px;background:rgba(0,201,232,.09);border:1px solid rgba(0,201,232,.25);color:#00c9e8;border-radius:5px;cursor:pointer">關閉</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  setDot('dot-ai', 'ok');
+
   // ── 呼叫 Gemini API ──
   const body = document.getElementById('ai-artifact-body');
   if (!body) { console.error('AI body element not found'); return; }
@@ -2072,6 +2138,7 @@ ${modeInstr}
 
   try {
     const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+    addLog('info', 'Gemini AI 分析中…');
     const r = await fetch(GEMINI_URL, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -2080,8 +2147,12 @@ ${modeInstr}
         generationConfig: {maxOutputTokens: 1500, temperature: 0.7}
       })
     });
+    if (!r.ok) {
+      const errText = await r.text();
+      throw new Error(`HTTP ${r.status}: ${errText.slice(0,200)}`);
+    }
     const d = await r.json();
-    if (d.error) throw new Error(d.error.message);
+    if (d.error) throw new Error(d.error.message || JSON.stringify(d.error));
     const txt = d.candidates?.[0]?.content?.parts?.[0]?.text || '分析失敗，請重試。';
     const NL = String.fromCharCode(10);
     const html = txt
