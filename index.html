@@ -736,12 +736,13 @@ async function fetchTWSEClose(code) {
   const no    = code.replace('.TWO','').replace('.TW','');
   const isOTC = code.endsWith('.TWO');
 
-  // 民國年日期（TPEx 用民國年）
-  const tw = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
-  const rocY  = tw.getFullYear() - 1911;
+  const tw    = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
   const mm    = String(tw.getMonth()+1).padStart(2,'0');
   const dd    = String(tw.getDate()).padStart(2,'0');
-  const yyyymm = tw.getFullYear()+String(tw.getMonth()+1).padStart(2,'0');
+  const yyyymm = tw.getFullYear()+mm;
+
+  // ★ 判斷是否已過收盤時間（14:30後視為今日結算完成）
+  const isAfterClose = (tw.getHours() + tw.getMinutes()/60) >= 14.5;
 
   // 解析輔助函數
   const parseClose = row => {
@@ -763,26 +764,23 @@ async function fetchTWSEClose(code) {
     ? parseFloat((row[5]||'0').replace(/,/g,''))
     : parseFloat(row.LowestPrice||row['最低價']||row.LowPrice||0);
 
+  const fmtDate = d => `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+
   try {
     let urls;
     if (isOTC) {
-      // 上櫃：TPEx dailyQuotes（全市場，需過濾個股）
-      // 格式：date=YYYY/MM/DD
-      const dateStr = `${tw.getFullYear()}/${mm}/${dd}`;
+      const dateStr = fmtDate(tw);
       const prevDate = (() => {
         const d2 = new Date(tw); d2.setDate(d2.getDate()-1);
-        // 往前找最近的工作日
         while(d2.getDay()===0||d2.getDay()===6) d2.setDate(d2.getDate()-1);
-        return `${d2.getFullYear()}/${String(d2.getMonth()+1).padStart(2,'0')}/${String(d2.getDate()).padStart(2,'0')}`;
+        return fmtDate(d2);
       })();
-      // 嘗試今日，若無資料嘗試昨日
       urls = [
         `https://corsproxy.io/?${encodeURIComponent('https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?response=json&date='+dateStr)}`,
         `https://corsproxy.io/?${encodeURIComponent('https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?response=json&date='+prevDate)}`,
         `https://api.allorigins.win/raw?url=${encodeURIComponent('https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?response=json&date='+prevDate)}`,
       ];
     } else {
-      // 上市：TWSE STOCK_DAY（個股當月）
       urls = [
         `https://corsproxy.io/?${encodeURIComponent(`https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymm}01&stockNo=${no}`)}`,
         `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymm}01&stockNo=${no}`)}`,
@@ -799,33 +797,39 @@ async function fetchTWSEClose(code) {
         let price, prev, high, low, vol;
 
         if (isOTC) {
-          // TPEx dailyQuotes 格式：aaData 陣列，每筆是 [代號,名稱,收盤,漲跌,開盤,最高,最低,量,...]
           const rows = raw.aaData || raw.tables?.[0]?.data || [];
           const row  = rows.find(r => r[0] === no || r[0]?.trim() === no);
           if (!row) { addLog('warn',`TPEx 找不到 ${no}`); continue; }
-          price = parseFloat((row[2]||'0').replace(/,/g,''));   // 收盤
-          high  = parseFloat((row[5]||'0').replace(/,/g,''));   // 最高
-          low   = parseFloat((row[6]||'0').replace(/,/g,''));   // 最低
-          vol   = Math.round(parseFloat((row[7]||'0').replace(/,/g,''))/1000); // 量
-          // 昨收 = 今日收盤（本日資料中的收盤就是今日/昨日收盤）
-          prev  = price;
-          // 用漲跌計算前天收盤
+          price = parseFloat((row[2]||'0').replace(/,/g,''));
+          high  = parseFloat((row[5]||'0').replace(/,/g,''));
+          low   = parseFloat((row[6]||'0').replace(/,/g,''));
+          vol   = Math.round(parseFloat((row[7]||'0').replace(/,/g,''))/1000);
           const chgStr = (row[3]||'').replace(/,/g,'').replace(/[+]/g,'');
           const chgVal = parseFloat(chgStr) || null;
           prev = chgVal !== null ? +(price - chgVal).toFixed(2) : price;
         } else {
-          // TWSE STOCK_DAY 格式
+          // ★ TWSE STOCK_DAY：API只返回已結算交易日
+          //   盤後(14:30後)：最後一筆=今日收盤，倒數第二筆=昨收
+          //   盤前/中：最後一筆=前一交易日收盤（即昨收），倒數第二筆=前前日
           const rows2 = raw.data || (Array.isArray(raw) ? raw : null);
           if (!rows2 || !rows2.length) continue;
           const latest  = rows2[rows2.length-1];
           const prevDay = rows2.length >= 2 ? rows2[rows2.length-2] : null;
-          price = parseClose(latest);
-          prev  = prevDay ? parseClose(prevDay) : null;
-          high  = parseHigh(latest) || price;
-          low   = parseLow(latest)  || price;
-          vol   = parseVol(latest);
-          // 更新 SPARK（上市才有月線陣列）
-          if (rows2 && rows2.length >= 5) {
+          if (isAfterClose) {
+            // 盤後：最後一筆=今收，倒數第二=昨收
+            price = parseClose(latest);
+            prev  = prevDay ? parseClose(prevDay) : null;
+            addLog('ok', `TWSE盤後 ${no}: 今收=${price} 昨收=${prev} [${latest[0]}]`);
+          } else {
+            // 盤前/中：最後一筆=昨收（前一結算日），以此為當前參考價
+            price = parseClose(latest);
+            prev  = prevDay ? parseClose(prevDay) : null;
+            addLog('info', `TWSE盤前 ${no}: 最新結算日=${price} [${latest[0]}]（今日未收盤）`);
+          }
+          high = parseHigh(latest) || price;
+          low  = parseLow(latest)  || price;
+          vol  = parseVol(latest);
+          if (rows2.length >= 5) {
             SPARK[code] = rows2.slice(-5).map(r => parseClose(r)).filter(v => v > 0);
           }
         }
@@ -1318,7 +1322,7 @@ let techCache = {};  // 快取技術指標資料 {code: {macd,kd,rsi,bb,closes,d
 // 取得近N個月份字串 [202504, 202503, 202502]
 function getRecentMonths(n=3) {
   const months = [];
-  const d = new Date();
+  const d = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
   for (let i=0; i<n; i++) {
     const y = d.getFullYear();
     const m = String(d.getMonth()+1).padStart(2,'0');
@@ -1329,28 +1333,77 @@ function getRecentMonths(n=3) {
 }
 
 // 抓 TWSE/TPEx 月線資料
+// TWSE: STOCK_DAY row欄位 [0]民國日期 [1]量(股) [3]開 [4]高 [5]低 [6]收
+// TPEx: tradingStock/exchange aaData [0]日期 [3]收 [8]開 [9]高 [10]低 [6]量(千股)
 async function fetchMonthlyOHLCV(stockNo, isOTC, yyyymmdd) {
-  const base = isOTC
-    ? `https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock/result?date=${yyyymmdd}&stockCode=${stockNo}&response=json`
-    : `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymmdd}&stockNo=${stockNo}`;
-  const proxy = `https://corsproxy.io/?${encodeURIComponent(base)}`;
-  try {
-    const r = await fetch(proxy, {signal: AbortSignal.timeout(8000)});
-    if (!r.ok) return [];
-    const j = await r.json();
-    // TWSE 格式
-    if (j.data) {
-      return j.data.map(row => ({
-        date:  row[0],
-        open:  parseFloat(row[3].replace(/,/g,'')),
-        high:  parseFloat(row[4].replace(/,/g,'')),
-        low:   parseFloat(row[5].replace(/,/g,'')),
-        close: parseFloat(row[6].replace(/,/g,'')),
-        vol:   Math.round(parseFloat(row[1].replace(/,/g,''))/1000),
-      })).filter(d => !isNaN(d.close));
+  const proxies = [
+    url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  ];
+  const toF = s => parseFloat((s||'0').toString().replace(/,/g,'')) || 0;
+
+  if (!isOTC) {
+    // ── 上市 TWSE STOCK_DAY ──
+    const base = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymmdd}&stockNo=${stockNo}`;
+    for (const mkProxy of proxies) {
+      try {
+        const r = await fetch(mkProxy(base), {signal: AbortSignal.timeout(9000)});
+        if (!r.ok) continue;
+        const j = await r.json();
+        if (!j.data?.length) continue;
+        return j.data.map(row => ({
+          date:  row[0],
+          open:  toF(row[3]),
+          high:  toF(row[4]),
+          low:   toF(row[5]),
+          close: toF(row[6]),
+          vol:   Math.round(toF(row[1])/1000),
+        })).filter(d => d.close > 0);
+      } catch(e) { /* 嘗試下一個 proxy */ }
     }
     return [];
-  } catch(e) { return []; }
+  }
+
+  // ── 上櫃 TPEx（民國年格式）──
+  // tradingStock/exchange: aaData[0]=日期(民國) [3]=收 [8]=開 [9]=高 [10]=低 [6]=量(千股)
+  const twDate = new Date(yyyymmdd.slice(0,4)+'-'+yyyymmdd.slice(4,6)+'-01');
+  const rocY   = twDate.getFullYear()-1911;
+  const mmStr  = String(twDate.getMonth()+1).padStart(2,'0');
+  const dateRoc = `${rocY}/${mmStr}/01`;
+
+  const tpexUrls = [
+    `https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock/exchange?date=${dateRoc}&stockCode=${stockNo}&response=json`,
+    `https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock/result?date=${dateRoc}&stockCode=${stockNo}&response=json`,
+  ];
+
+  for (const base of tpexUrls) {
+    for (const mkProxy of proxies) {
+      try {
+        const r = await fetch(mkProxy(base), {signal: AbortSignal.timeout(10000)});
+        if (!r.ok) continue;
+        const j = await r.json();
+        const rows = j.aaData || [];
+        if (!rows.length) continue;
+        // exchange端點：[0]日期 [3]收 [8]開 [9]高 [10]低 [6]量
+        // result端點：  [0]日期 [2]收 [4]開 [5]高 [6]低 [7]量
+        const isExchange = base.includes('exchange');
+        const parsed = rows.map(row => ({
+          date:  String(row[0]||''),
+          open:  toF(isExchange ? row[8]  : row[4]),
+          high:  toF(isExchange ? row[9]  : row[5]),
+          low:   toF(isExchange ? row[10] : row[6]),
+          close: toF(isExchange ? row[3]  : row[2]),
+          vol:   Math.round(toF(isExchange ? row[6] : row[7])),
+        })).filter(d => d.close > 0);
+        if (parsed.length > 0) {
+          addLog('ok', `TPEx月線 ${stockNo} ${dateRoc}: ${parsed.length}筆`);
+          return parsed;
+        }
+      } catch(e) { addLog('warn', `TPEx月線 ${stockNo} ${base.includes('exchange')?'exchange':'result'} 失敗: ${e.message}`); }
+    }
+  }
+  addLog('warn', `TPEx月線 ${stockNo} ${dateRoc} 所有端點失敗`);
+  return [];
 }
 
 // 計算 EMA
@@ -2213,8 +2266,9 @@ ${modeInstr}
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
+        system_instruction: {parts: [{text: '你是專業台股分析師。所有分析報告必須全程使用繁體中文撰寫，嚴禁輸出英文句子或段落。每份報告字數須在300至500字之間，以完整段落格式呈現，每段至少2-3句話，不可以條列式或過短摘要取代。'}]},
         contents: [{parts: [{text: prompt}]}],
-        generationConfig: {maxOutputTokens: 1500, temperature: 0.7}
+        generationConfig: {maxOutputTokens: 2000, temperature: 0.5}
       })
     });
     if (!r.ok) {
