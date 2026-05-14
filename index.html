@@ -637,15 +637,23 @@ async function fetchFinsWithGemini() {
       { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
           contents:[{parts:[{text:prompt}]}],
-          generationConfig:{maxOutputTokens:2000,temperature:0.1}
+          generationConfig:{maxOutputTokens:4096,temperature:0.1}
         })
       }
     );
     const d = await r.json();
     if (d.error) throw new Error(d.error.message);
-    let txt = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    // 清理可能的 markdown 包裝
-    txt = txt.replace(/```json/g,'').replace(/```/g,'').trim();
+    const allParts = d.candidates?.[0]?.content?.parts || [];
+    let txt = (allParts.find(p => p.text != null) || allParts[0])?.text || '';
+    txt = txt.replace(/```json([\s\S]*?)```/g,'$1').replace(/```/g,'').trim();
+    // 修復截斷小數（如 "8." -> "8.0"）
+    txt = txt.replace(/:(\s*)(-?\d+\.)(\s*)([,}\n])/g, ':$1${2}0$4');
+    // 修復截斷 JSON 結尾
+    if (!txt.endsWith('}')) {
+      txt = txt.replace(/,?\s*"[^"]*"\s*:\s*[^,}\]]*$/, '');
+      if (!txt.endsWith('}')) txt += '}';
+      while ((txt.match(/{/g)||[]).length > (txt.match(/}/g)||[]).length) txt += '}';
+    }
     const parsed = JSON.parse(txt);
     // 更新 FINS
     let updated = 0;
@@ -768,18 +776,55 @@ async function fetchTWSEClose(code) {
 
   try {
     let urls;
+    // ★★ 上櫃：stk_quote_result.php 民國年格式（正確端點）
     if (isOTC) {
-      const dateStr = fmtDate(tw);
-      const prevDate = (() => {
-        const d2 = new Date(tw); d2.setDate(d2.getDate()-1);
-        while(d2.getDay()===0||d2.getDay()===6) d2.setDate(d2.getDate()-1);
-        return fmtDate(d2);
-      })();
-      urls = [
-        `https://corsproxy.io/?${encodeURIComponent('https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?response=json&date='+dateStr)}`,
-        `https://corsproxy.io/?${encodeURIComponent('https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?response=json&date='+prevDate)}`,
-        `https://api.allorigins.win/raw?url=${encodeURIComponent('https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?response=json&date='+prevDate)}`,
+      const proxies = [
+        u=>`https://corsproxy.io/?${encodeURIComponent(u)}`,
+        u=>`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+        u=>`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
       ];
+      for (let back=0; back<=3; back++) {
+        const dx = new Date(tw); dx.setDate(dx.getDate()-back);
+        while(dx.getDay()===0||dx.getDay()===6) dx.setDate(dx.getDate()-1);
+        const roc = `${dx.getFullYear()-1911}/${String(dx.getMonth()+1).padStart(2,'0')}/${String(dx.getDate()).padStart(2,'0')}`;
+        const tpexUrl = `https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&d=${encodeURIComponent(roc)}&stkno=${no}`;
+        for (const mkP of proxies) {
+          try {
+            const r = await fetch(mkP(tpexUrl),{signal:AbortSignal.timeout(9000)});
+            if(!r.ok) continue;
+            const raw = await r.json();
+            const rows = raw.aaData||[];
+            if(!rows.length){ addLog('warn',`TPEx無資料 ${roc}`); break; }
+            const row = rows.find(r=>(r[0]||'').trim()===no)||rows[0];
+            const cs = (row[2]||'').replace(/,/g,'').trim();
+            if(cs==='---'||!cs){ addLog('warn',`TPEx ${no} ${roc} 無成交`); break; }
+            const price = parseFloat(cs);
+            if(price<=0) continue;
+            const chgRaw = parseFloat((row[3]||'0').replace(/,/g,'').replace(/[+▲]/g,'').replace(/[▼]/g,'-'))||0;
+            const prev  = +(price-chgRaw).toFixed(2);
+            const high  = parseFloat((row[5]||cs).replace(/,/g,''))||price;
+            const low   = parseFloat((row[6]||cs).replace(/,/g,''))||price;
+            const vol   = Math.round(parseFloat((row[10]||'0').replace(/,/g,'')))||0;
+            const chg   = +(price-prev).toFixed(2);
+            const pct   = prev>0?+(chg/prev*100).toFixed(2):null;
+            addLog('ok',`✓ TPEx ${no} 民國${roc}: ${price}`);
+            return {price,chg,pct,prev,vol,high,low,src:'twse'};
+          } catch(e){ addLog('warn',`TPEx ${no}: ${e.message}`); }
+        }
+        if(back<3) await new Promise(r=>setTimeout(r,3000));
+      }
+      // proxy全掛 → Gemini fallback
+      if(geminiKey){
+        try{
+          const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+            {method:'POST',headers:{'Content-Type':'application/json'},
+             body:JSON.stringify({contents:[{parts:[{text:`台股上櫃${no}最近交易日收盤價，只回數字`}]}],generationConfig:{maxOutputTokens:20,temperature:0}})});
+          const d=await r.json();
+          const p=parseFloat(((d.candidates?.[0]?.content?.parts||[]).find(x=>x.text)?.text||'').replace(/[^0-9.]/g,''));
+          if(p>0){addLog('ok',`✓ ${no}[Gemini]${p}`);return{price:p,chg:null,pct:null,prev:null,vol:0,high:p,low:p,src:'gemini'};}
+        }catch(e){}
+      }
+      return null;
     } else {
       urls = [
         `https://corsproxy.io/?${encodeURIComponent(`https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymm}01&stockNo=${no}`)}`,
@@ -796,18 +841,7 @@ async function fetchTWSEClose(code) {
 
         let price, prev, high, low, vol;
 
-        if (isOTC) {
-          const rows = raw.aaData || raw.tables?.[0]?.data || [];
-          const row  = rows.find(r => r[0] === no || r[0]?.trim() === no);
-          if (!row) { addLog('warn',`TPEx 找不到 ${no}`); continue; }
-          price = parseFloat((row[2]||'0').replace(/,/g,''));
-          high  = parseFloat((row[5]||'0').replace(/,/g,''));
-          low   = parseFloat((row[6]||'0').replace(/,/g,''));
-          vol   = Math.round(parseFloat((row[7]||'0').replace(/,/g,''))/1000);
-          const chgStr = (row[3]||'').replace(/,/g,'').replace(/[+]/g,'');
-          const chgVal = parseFloat(chgStr) || null;
-          prev = chgVal !== null ? +(price - chgVal).toFixed(2) : price;
-        } else {
+        if (true) {
           // ★ TWSE STOCK_DAY：API只返回已結算交易日
           //   盤後(14:30後)：最後一筆=今日收盤，倒數第二筆=昨收
           //   盤前/中：最後一筆=前一交易日收盤（即昨收），倒數第二筆=前前日
@@ -1118,28 +1152,17 @@ async function fetchPrevClose(code) {
     }
   } catch(e) {}
 
-  // ── 最終 fallback：用 Gemini 查昨收價 ──
+  // Gemini 最終 fallback
   if (geminiKey) {
     try {
-      addLog('info', `昨收改用 Gemini 查詢 ${code}…`);
-      const no2 = code.replace('.TWO','').replace('.TW','');
-      const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-        { method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({
-            contents:[{parts:[{text:`台股代號${no2}，請直接回答最近一個交易日的收盤價，只回數字，不要任何文字或單位，例如：120.50`}]}],
-            generationConfig:{maxOutputTokens:20,temperature:0}
-          })
-        }
-      );
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+        {method:'POST',headers:{'Content-Type':'application/json'},
+         body:JSON.stringify({contents:[{parts:[{text:`台股代號${no}最近交易日收盤價，只回數字`}]}],generationConfig:{maxOutputTokens:20,temperature:0}})});
       const d = await r.json();
-      const parts = d.candidates?.[0]?.content?.parts || [];
-      const txt = (parts.find(p=>p.text!=null)||parts[0])?.text?.trim() || '';
-      const p = parseFloat(txt.replace(/[^0-9.]/g,''));
-      if (p > 0) { addLog('ok', `昨收[Gemini] ${code}: ${p}`); return p; }
-    } catch(e) { addLog('warn', `Gemini 昨收失敗: ${e.message}`); }
+      const p = parseFloat(((d.candidates?.[0]?.content?.parts||[]).find(x=>x.text)?.text||'').replace(/[^0-9.]/g,''));
+      if(p>0){addLog('ok',`昨收[Gemini] ${code}: ${p}`);return p;}
+    } catch(e){}
   }
-
   addLog('warn', `昨收無法取得: ${code}`);
   return null;
 }
@@ -1167,8 +1190,16 @@ async function fetchOne(code) {
       if (result) addLog('ok',`✓ ${code} [Yahoo] ${result.price}`);
     }
     if (result) {
+      // 盤後模式（TWSE Close）：
+      //   result.price = 最新交易日收盤（昨收）
+      //   result.prev  = 前天收盤（用來算昨天漲跌）
+      // 盤中模式（MIS/Yahoo）：
+      //   result.price = 即時價格
+      //   result.prev  = 昨收（需要確保正確）
+
       if (result.src === 'twse') {
         // 盤後：price 就是昨收，不需要額外補抓
+        // prev 是前天，chg/pct 已正確計算
       } else if (!result.prev || result.prev <= 0) {
         // 盤中：prev 為空，補抓昨收
         const p = await fetchPrevClose(code);
@@ -1179,30 +1210,6 @@ async function fetchOne(code) {
         }
       }
       return result;
-    }
-    // ── 台股最終 fallback：Gemini 查當日股價 ──
-    if (geminiKey) {
-      try {
-        addLog('info', `所有 proxy 失敗，改用 Gemini 查 ${code}…`);
-        const no2 = code.replace('.TWO','').replace('.TW','');
-        const r = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-          { method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({
-              contents:[{parts:[{text:`台股代號${no2}，請直接回答最近一個交易日的收盤價，只回數字，不要任何文字或單位，例如：120.50`}]}],
-              generationConfig:{maxOutputTokens:20,temperature:0}
-            })
-          }
-        );
-        const d = await r.json();
-        const parts = d.candidates?.[0]?.content?.parts || [];
-        const txt = (parts.find(p=>p.text!=null)||parts[0])?.text?.trim()||'';
-        const price = parseFloat(txt.replace(/[^0-9.]/g,''));
-        if (price > 0) {
-          addLog('ok', `✓ ${code} [Gemini] ${price}`);
-          return {price, chg:null, pct:null, prev:null, vol:0, high:price, low:price, src:'gemini'};
-        }
-      } catch(e) { addLog('warn', `Gemini 報價失敗: ${e.message}`); }
     }
   } else {
     // 美股：Finnhub → Yahoo
