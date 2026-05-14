@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -638,16 +637,15 @@ async function fetchFinsWithGemini() {
       { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
           contents:[{parts:[{text:prompt}]}],
-          generationConfig:{maxOutputTokens:4096,temperature:0.1}
+          generationConfig:{maxOutputTokens:2000,temperature:0.1}
         })
       }
     );
     const d = await r.json();
     if (d.error) throw new Error(d.error.message);
-    const allParts = d.candidates?.[0]?.content?.parts || [];
-    let txt = (allParts.find(p => p.text != null) || allParts[0])?.text || '';
-    txt = txt.replace(/```json([\s\S]*?)```/g,'$1').replace(/```/g,'').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g,'').trim();
-    if (txt && !txt.endsWith('}')) { const i = txt.lastIndexOf('"}'); if(i>10) txt=txt.slice(0,i+2)+'}'; }
+    let txt = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    // 清理可能的 markdown 包裝
+    txt = txt.replace(/```json/g,'').replace(/```/g,'').trim();
     const parsed = JSON.parse(txt);
     // 更新 FINS
     let updated = 0;
@@ -1053,29 +1051,9 @@ async function fetchPrevClose(code) {
     const mm2   = String(tw2.getMonth()+1).padStart(2,'0');
     const dd2   = String(tw2.getDate()).padStart(2,'0');
     const dateTPEx = `${tw2.getFullYear()}/${mm2}/${dd2}`;
-    if (isOTC) {
-      for (let back=0; back<=3; back++) {
-        const dx = new Date(tw2); dx.setDate(dx.getDate()-back);
-        while(dx.getDay()===0||dx.getDay()===6) dx.setDate(dx.getDate()-1);
-        const rd = `${dx.getFullYear()-1911}/${String(dx.getMonth()+1).padStart(2,'0')}/${String(dx.getDate()).padStart(2,'0')}`;
-        const url = `https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&d=${encodeURIComponent(rd)}&stkno=${no}`;
-        for (const pfn of [u=>`https://corsproxy.io/?${encodeURIComponent(u)}`,u=>`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`]) {
-          try {
-            const r = await fetch(pfn(url),{signal:AbortSignal.timeout(9000)});
-            if(!r.ok) continue;
-            const raw = await r.json();
-            const row = (raw.aaData||[]).find(r=>(r[0]||'').trim()===no);
-            if(!row) continue;
-            const cs = (row[2]||'').replace(/,/g,'').trim(); // [2]=收盤價
-            if(cs==='---'||!cs) break;
-            const p = parseFloat(cs);
-            if(p>0){ addLog('ok',`昨收[TPEx民國${rd}] ${code}: ${p}`); return p; }
-          } catch(e){}
-        }
-        if(back<3) await new Promise(r=>setTimeout(r,3000));
-      }
-    } else {
-    const base = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymm}01&stockNo=${no}`;
+    const base = isOTC
+      ? `https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes?response=json&date=${dateTPEx}`
+      : `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${yyyymm}01&stockNo=${no}`;
     for (const pfn of [
       u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
       u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
@@ -1085,15 +1063,28 @@ async function fetchPrevClose(code) {
         const r = await fetch(pfn(base), {signal: AbortSignal.timeout(8000)});
         if (!r.ok) continue;
         const raw = await r.json();
-        const rows = raw.data || (Array.isArray(raw) ? raw : null);
+        // 支援兩種格式
+        let rows;
+        if (isOTC) {
+          // TPEx dailyQuotes: aaData = [[代號,名稱,收盤,漲跌,開盤,最高,最低,量...],...]
+          const allRows = raw.aaData || raw.tables?.[0]?.data || [];
+          const myRow = allRows.find(r => (r[0]||'').trim() === no);
+          if (!myRow) { addLog('warn',`TPEx找不到${no}`); continue; }
+          // 收盤在 index 2，漲跌在 index 3
+          const p = parseFloat((myRow[2]||'0').replace(/,/g,''));
+          if (p > 0) { addLog('ok', `昨收[TPEx] ${code}: ${p}`); return p; }
+          continue;
+        } else {
+          rows = raw.data || (Array.isArray(raw) ? raw : null);
+        }
         if (!rows || rows.length < 1) continue;
+        // 上市：取最後一筆收盤（最新交易日 = 昨收）
         const lastRow3 = rows[rows.length - 1];
         const p = Array.isArray(lastRow3)
           ? parseFloat((lastRow3[6]||'').replace(/,/g,''))
           : parseFloat(lastRow3.ClosingPrice || lastRow3['收盤價'] || 0);
         if (p > 0) { addLog('ok', `昨收[STOCK_DAY] ${code}: ${p}`); return p; }
       } catch(e) {}
-    }
     }
   } catch(e) {}
 
@@ -1127,6 +1118,28 @@ async function fetchPrevClose(code) {
     }
   } catch(e) {}
 
+  // ── 最終 fallback：用 Gemini 查昨收價 ──
+  if (geminiKey) {
+    try {
+      addLog('info', `昨收改用 Gemini 查詢 ${code}…`);
+      const no2 = code.replace('.TWO','').replace('.TW','');
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+        { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            contents:[{parts:[{text:`台股代號${no2}，請直接回答最近一個交易日的收盤價，只回數字，不要任何文字或單位，例如：120.50`}]}],
+            generationConfig:{maxOutputTokens:20,temperature:0}
+          })
+        }
+      );
+      const d = await r.json();
+      const parts = d.candidates?.[0]?.content?.parts || [];
+      const txt = (parts.find(p=>p.text!=null)||parts[0])?.text?.trim() || '';
+      const p = parseFloat(txt.replace(/[^0-9.]/g,''));
+      if (p > 0) { addLog('ok', `昨收[Gemini] ${code}: ${p}`); return p; }
+    } catch(e) { addLog('warn', `Gemini 昨收失敗: ${e.message}`); }
+  }
+
   addLog('warn', `昨收無法取得: ${code}`);
   return null;
 }
@@ -1154,16 +1167,8 @@ async function fetchOne(code) {
       if (result) addLog('ok',`✓ ${code} [Yahoo] ${result.price}`);
     }
     if (result) {
-      // 盤後模式（TWSE Close）：
-      //   result.price = 最新交易日收盤（昨收）
-      //   result.prev  = 前天收盤（用來算昨天漲跌）
-      // 盤中模式（MIS/Yahoo）：
-      //   result.price = 即時價格
-      //   result.prev  = 昨收（需要確保正確）
-
       if (result.src === 'twse') {
         // 盤後：price 就是昨收，不需要額外補抓
-        // prev 是前天，chg/pct 已正確計算
       } else if (!result.prev || result.prev <= 0) {
         // 盤中：prev 為空，補抓昨收
         const p = await fetchPrevClose(code);
@@ -1174,6 +1179,30 @@ async function fetchOne(code) {
         }
       }
       return result;
+    }
+    // ── 台股最終 fallback：Gemini 查當日股價 ──
+    if (geminiKey) {
+      try {
+        addLog('info', `所有 proxy 失敗，改用 Gemini 查 ${code}…`);
+        const no2 = code.replace('.TWO','').replace('.TW','');
+        const r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+          { method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+              contents:[{parts:[{text:`台股代號${no2}，請直接回答最近一個交易日的收盤價，只回數字，不要任何文字或單位，例如：120.50`}]}],
+              generationConfig:{maxOutputTokens:20,temperature:0}
+            })
+          }
+        );
+        const d = await r.json();
+        const parts = d.candidates?.[0]?.content?.parts || [];
+        const txt = (parts.find(p=>p.text!=null)||parts[0])?.text?.trim()||'';
+        const price = parseFloat(txt.replace(/[^0-9.]/g,''));
+        if (price > 0) {
+          addLog('ok', `✓ ${code} [Gemini] ${price}`);
+          return {price, chg:null, pct:null, prev:null, vol:0, high:price, low:price, src:'gemini'};
+        }
+      } catch(e) { addLog('warn', `Gemini 報價失敗: ${e.message}`); }
     }
   } else {
     // 美股：Finnhub → Yahoo
@@ -2189,8 +2218,8 @@ async function runAI(code, name, sector) {
   const modeStr   = currentMode === 'before' ? '盤前' : '盤後';
   const modeColor = currentMode === 'before' ? '#00c9e8' : '#00e676';
   const modeInstr = currentMode === 'before'
-    ? `【盤前分析 — 請逐段輸出，不得省略任何一段】\n第一段【昨收技術形態】K線型態與量能多空研判\n第二段【今日開盤預判】預判開盤方向與可能缺口\n第三段【總經與新聞影響】產業/匯率/政策面影響\n第四段【法人籌碼方向】外資/投信/自營意圖解讀\n第五段【支撐壓力與操作建議】關鍵價位 + 明確操作建議（買進/持有/觀察/賣出）+ 2-3個主要風險`
-    : `【盤後分析 — 請逐段輸出，不得省略任何一段】\n第一段【今日量價複盤】成交量能與價格走勢健康度\n第二段【量能近期變化】近5日量能趨勢與資金動向\n第三段【技術指標現況】MACD(DIF/DEA/柱)/KD(K值D值)/RSI/布林%B逐一說明\n第四段【法人買賣超解讀】三大法人今日數據與主力意圖\n第五段【財務評估與明日策略】EPS/毛利率/營收YOY評估 + 明確操作建議 + 具體停損點(元)`;
+    ? '請依序分析：\n【技術形態與開盤預判】昨收與今日預判方向，關鍵支撐壓力\n【總體經濟影響】產業相關總經因素\n【法人籌碼方向】三大法人動態解讀\n【操作建議】明確說明建議動作（買進/持有/觀察/賣出）及理由\n【主要風險】列出2-3個風險點'
+    : '請依序分析：\n【今日量價複盤】成交量能與價格走勢\n【技術指標現況】MACD/KD/RSI/布林通道現況\n【法人買賣超解讀】三大法人動態\n【財務數據評估】EPS/毛利率/營收評估\n【明日操作策略】明確說明建議動作（買進/持有/觀察/賣出）及停損點';
 
   const instRaw3  = getInstData(code);
   const instStr   = instRaw3 ? `三大法人合計${instRaw3.net>=0?'+':''}${instRaw3.net}張（外資${instRaw3.f>=0?'+':''}${instRaw3.f}，投信${instRaw3.i>=0?'+':''}${instRaw3.i}，自營${instRaw3.d>=0?'+':''}${instRaw3.d}）` : '尚未取得';
