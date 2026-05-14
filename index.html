@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -1061,15 +1060,26 @@ async function fetchPrevClose(code) {
         if (!r.ok) continue;
         const raw = await r.json();
         // 支援兩種格式
-        const rows = raw.data || (Array.isArray(raw) ? raw : null);
-        if (!rows || rows.length < 2) continue;
-        // 取倒數第2筆收盤
-        // 昨收 = 最後一筆（最新交易日收盤）
+        let rows;
+        if (isOTC) {
+          // TPEx dailyQuotes: aaData = [[代號,名稱,收盤,漲跌,開盤,最高,最低,量...],...]
+          const allRows = raw.aaData || raw.tables?.[0]?.data || [];
+          const myRow = allRows.find(r => (r[0]||'').trim() === no);
+          if (!myRow) { addLog('warn',`TPEx找不到${no}`); continue; }
+          // 收盤在 index 2，漲跌在 index 3
+          const p = parseFloat((myRow[2]||'0').replace(/,/g,''));
+          if (p > 0) { addLog('ok', `昨收[TPEx] ${code}: ${p}`); return p; }
+          continue;
+        } else {
+          rows = raw.data || (Array.isArray(raw) ? raw : null);
+        }
+        if (!rows || rows.length < 1) continue;
+        // 上市：取最後一筆收盤（最新交易日 = 昨收）
         const lastRow3 = rows[rows.length - 1];
         const p = Array.isArray(lastRow3)
           ? parseFloat((lastRow3[6]||'').replace(/,/g,''))
           : parseFloat(lastRow3.ClosingPrice || lastRow3['收盤價'] || 0);
-        if (p > 0) { addLog('ok', `昨收[STOCK_DAY最新] ${code}: ${p}`); return p; }
+        if (p > 0) { addLog('ok', `昨收[STOCK_DAY] ${code}: ${p}`); return p; }
       } catch(e) {}
     }
   } catch(e) {}
@@ -1217,6 +1227,8 @@ async function fetchAllPrices() {
   btn.innerHTML = '↻ 抓取報價';
   loading = false;
   renderTable();
+  // 背景計算技術指標（不阻塞主流程）
+  computeAllTechSignals().catch(()=>{});
 }
 
 // ── LOG ──────────────────────────────────────────────────
@@ -1937,6 +1949,63 @@ function showDetail(code) {
   </div>`;
 }
 
+// ══════════════════════════════════════════════════════════
+// 技術指標動態計算：抓歷史資料後更新 SIGS
+// ══════════════════════════════════════════════════════════
+async function computeAllTechSignals() {
+  const allStocks = [...holdStocks, ...watchStocks].filter(s =>
+    s.type !== 'etf' && s.type !== 'lev'
+  );
+  addLog('info', `計算技術指標（${allStocks.length} 檔）…`);
+  for (const stock of allStocks) {
+    try {
+      const ind = await fetchTechIndicators(stock.code);
+      if (ind) {
+        SIGS[stock.code] = buildSigTags(stock.code, ind);
+        addLog('ok', `技術指標 ${stock.code}: ${SIGS[stock.code].join(' ')}`);
+      }
+    } catch(e) {}
+  }
+  renderTable();
+}
+
+// 根據指標數值產生訊號標籤
+function buildSigTags(code, ind) {
+  const tags = [];
+  const {macd, kd, rsi, bb} = ind;
+
+  // MACD
+  if (macd) {
+    if (macd.cross === '黃金交叉') tags.push('MACD金叉');
+    else if (macd.cross === '死亡交叉') tags.push('MACD死叉');
+    else tags.push(macd.dif > macd.dea ? 'MACD多頭' : 'MACD空頭');
+  }
+
+  // KD
+  if (kd) {
+    if (kd.cross === '黃金交叉') tags.push('KD金叉');
+    else if (kd.cross === '死亡交叉') tags.push('KD死叉');
+    else if (kd.k >= 80) tags.push('KD超買');
+    else if (kd.k <= 20) tags.push('KD超賣');
+    else tags.push(kd.k > kd.d ? 'KD向上' : 'KD走弱');
+  }
+
+  // RSI
+  if (rsi) {
+    tags.push(`RSI ${rsi.value}`);
+  }
+
+  // 布林
+  if (bb) {
+    if (bb.pb >= 90) tags.push('布林上緣');
+    else if (bb.pb <= 10) tags.push('布林下緣');
+    else if (bb.squeeze.includes('收縮')) tags.push('布林收斂');
+    else tags.push(bb.pb >= 60 ? '布林中軌上' : '布林中軌');
+  }
+
+  return tags;
+}
+
 // ── Gemini Key 管理 ──────────────────────────────────────
 let geminiKey = localStorage.getItem('gemini_api_key') || '';
 
@@ -2072,9 +2141,10 @@ async function runAI(code, name, sector) {
 漲跌：${pd?(pd.chg!=null?(pd.chg>=0?'+':'')+pd.chg+'元 ('+(pd.pct!=null?pd.pct.toFixed(2):'?')+'%)':'—'):'不明'}
 今日區間：${pd?pd.low+'～'+pd.high:'不明'}　成交量：${pd?fmt(pd.vol,0)+'張':'不明'}
 技術訊號：${(SIGS[code]||[]).join('、')||'無'}
+技術指標詳情：${(()=>{const c=techCache[code];if(!c)return '（按抓取報價後可取得）';const{macd,kd,rsi,bb}=c;const parts=[];if(macd)parts.push(`MACD DIF=${macd.dif} DEA=${macd.dea} 柱=${macd.bar}`);if(kd)parts.push(`KD K=${kd.k} D=${kd.d}`);if(rsi)parts.push(`RSI=${rsi.value}`);if(bb)parts.push(`布林 上=${bb.upper} 中=${bb.mid} 下=${bb.lower} %B=${bb.pb}%`);return parts.join('；')||'計算中'})()}
 法人：${instStr}
 EPS(去年/今年累積)：${fin2.eps_ly??'—'} / ${fin2.eps_ytd??'—'}　毛利率：${fin2.gm??'—'}%　營收YOY：${fin2.rev_yoy??'—'}%
-資料來源：${src}
+資料來源：${priceData[code]?.src==='twse-mis'?'TWSE即時':priceData[code]?.src==='twse'?'TWSE收盤':priceData[code]?.src==='yahoo'?'Yahoo Finance':'模擬資料'}
 
 ${modeInstr}
 
