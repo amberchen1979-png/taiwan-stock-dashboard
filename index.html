@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -630,22 +629,7 @@ async function fetchFinsWithGemini() {
   addLog('info', `🤖 Gemini 查詢財務資料：${allStocks.length} 檔…`);
   document.getElementById('ref-btn').innerHTML = '<span class="spin">↻</span> 抓財務中…';
 
-  const prompt = `你是台股財務資料查詢機器人，只能回傳JSON，絕對不能捏造數字。
-請根據台灣公開資訊觀測站（mops.twse.com.tw）最新公告，查詢以下個股財務數據：
-${allStocks.map(s=>`${s.code.replace('.TWO','').replace('.TW','')} ${s.name}`).join('、')}
-
-回傳格式（只回JSON本體，不要markdown，不要說明文字）：
-{
-  "代號.TW或.TWO": {
-    "eps_ly": 去年全年EPS（數字，取自年報），
-    "eps_ytd": 今年截至最新季度累積EPS（數字），
-    "gm": 最新一季毛利率（百分比數字，例如38.2），
-    "rev_yoy": 最新一個月營收年增率（百分比數字，例如12.4或-8.5）
-  }
-}
-
-代號對照：${allStocks.map(s=>s.name+':'+s.code).join('，')}
-注意：若無法確認某欄位請填null，絕對不可捏造。只回JSON。`;
+  const prompt = '你是台股財務分析師。請查詢以下台股個股最新公開財務資料，以JSON格式回答。個股：' + stockList + '。請回傳JSON格式（只回JSON，不要其他文字）：{"股票代號.TW或.TWO":{"eps_ly":去年全年EPS數字,"eps_ytd":今年累積EPS數字,"gm":最新季毛利率百分比數字,"rev_yoy":最新月營收年增率百分比數字}}。代號對照：' + allStocks.map(s=>s.name+':'+s.code).join(',') + '。資料來源公開財報公開資訊觀測站，只回JSON不要markdown。';
 
   try {
     const r = await fetch(
@@ -653,18 +637,28 @@ ${allStocks.map(s=>`${s.code.replace('.TWO','').replace('.TW','')} ${s.name}`).j
       { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
           contents:[{parts:[{text:prompt}]}],
-          generationConfig:{maxOutputTokens:4096,temperature:0.1}
+          generationConfig:{maxOutputTokens:4096,temperature:0}
         })
       }
     );
     const d = await r.json();
     if (d.error) throw new Error(d.error.message);
-    const allParts = d.candidates?.[0]?.content?.parts || [];
-    let txt = (allParts.find(p=>p.text!=null)||allParts[0])?.text||'';
-    txt = txt.replace(/```json([\s\S]*?)```/g,'$1').replace(/```/g,'').trim();
-    txt = txt.replace(/:(\s*)(-?\d+\.)(\s*)([,}\n])/g,':$10$4');
-    if(!txt.endsWith('}')){ txt=txt.replace(/,?\s*"[^"]*"\s*:\s*[^,}\]]*$/,''); if(!txt.endsWith('}'))txt+='}'; if((txt.match(/{/g)||[]).length>(txt.match(/}/g)||[]).length)txt+='}';}
-    const parsed = JSON.parse(txt);
+    const allParts2 = d.candidates?.[0]?.content?.parts || [];
+    let txt = (allParts2.find(p=>p.text!=null)||allParts2[0])?.text || '';
+    // 清理 markdown：處理 ```json 、json{ 等各種格式
+    txt = txt.replace(/^json\s*/i,'').replace(/```json\s*/gi,'').replace(/```/g,'').trim();
+    // 修復截斷小數 "8." -> "8.0"
+    txt = txt.replace(/:(\s*-?\d+\.)(\s*[,}\n])/g,':$10$2');
+    // 修復截斷結尾
+    if(!txt.endsWith('}')){txt=txt.replace(/,?\s*"[^"]*"\s*:\s*[^,}\]]*$/,'');if(!txt.endsWith('}'))txt+='}';while((txt.match(/{/g)||[]).length>(txt.match(/}/g)||[]).length)txt+='}';}
+    let parsed;
+    try { parsed = JSON.parse(txt); }
+    catch(je) {
+      // 最後嘗試：找第一個 { 到最後一個 } 之間的內容
+      const start=txt.indexOf('{'), end=txt.lastIndexOf('}');
+      if(start>=0&&end>start) parsed=JSON.parse(txt.slice(start,end+1));
+      else throw je;
+    }
     // 更新 FINS
     let updated = 0;
     Object.keys(parsed).forEach(code => {
@@ -679,13 +673,10 @@ ${allStocks.map(s=>`${s.code.replace('.TWO','').replace('.TW','')} ${s.name}`).j
     // 快取到 localStorage（30天）
     localStorage.setItem('fins_cache', JSON.stringify(parsed));
     localStorage.setItem('fins_cache_date', new Date().toISOString());
-    const updatedNames = Object.keys(parsed).map(c => {
-      const s = [...holdStocks,...watchStocks].find(x=>x.code===c);
-      return s ? `${c.replace('.TWO','').replace('.TW','')} ${s.name}` : c;
-    }).join('\n  ');
+    const updNames = Object.keys(parsed).map(c=>{const s=[...holdStocks,...watchStocks].find(x=>x.code===c);return s?`${c.replace('.TWO','').replace('.TW','')}${s.name}`:c;}).join('、');
     addLog('ok', `✅ 財務資料更新完成：${updated} 檔，已快取`);
     renderTable();
-    alert(`✅ 財務資料更新完成！\n已更新 ${updated} 檔：\n  ${updatedNames}\n\n資料來源：Gemini AI（公開財報）`);
+    alert(`✅ 財務資料更新！已更新 ${updated} 檔：\n${updNames}\n資料來源：Gemini AI`);
   } catch(e) {
     addLog('err', `❌ 財務資料抓取失敗：${e.message}`);
     alert(`財務資料抓取失敗：${e.message}
@@ -729,25 +720,34 @@ function toMISCode(code) {
 
 async function fetchTWSEMIS(code) {
   if (!code.endsWith('.TW') && !code.endsWith('.TWO')) return null;
-  try {
-    const misCode = toMISCode(code);
-    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${misCode}&json=1&delay=0`;
-    const proxy = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-    const r = await fetch(proxy, {signal: AbortSignal.timeout(8000)});
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const j = await r.json();
-    const d = j?.msgArray?.[0];
-    if (!d || !d.z || d.z==='-') throw new Error('no realtime data');
-    const price = parseFloat(d.z);   // 成交價
-    const prev  = parseFloat(d.y);   // 昨收
-    const high  = parseFloat(d.h);
-    const low   = parseFloat(d.l);
-    const vol   = Math.round(parseFloat(d.v||0));
-    const chg   = (prev && prev > 0) ? +(price-prev).toFixed(2) : null;
-    const pct   = (prev && prev > 0 && chg !== null) ? +(chg/prev*100).toFixed(2) : null;
-    if (!price||price===0) throw new Error('price=0');
-    return {price, chg, pct, prev: (prev>0?prev:null), vol, high, low, src:'twse-mis'};
-  } catch(e) { return null; }
+  const misCode = toMISCode(code);
+  const misUrl  = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${misCode}&json=1&delay=0`;
+  // ★ MIS 支援直連（有CORS header），proxy 只作備援
+  const misTargets = [
+    misUrl,
+    `https://corsproxy.io/?${encodeURIComponent(misUrl)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(misUrl)}`,
+  ];
+  for (const target of misTargets) {
+    try {
+      const r = await fetch(target, {signal: AbortSignal.timeout(6000)});
+      if (!r.ok) continue;
+      const j = await r.json();
+      const d = j?.msgArray?.[0];
+      if (!d) continue;
+      // 盤中用 z（成交價），盤後/盤前用 y（昨收）作為參考價
+      const price = parseFloat(d.z && d.z!=='-' ? d.z : d.y);
+      const prev  = parseFloat(d.y);
+      const high  = parseFloat(d.h && d.h!=='-' ? d.h : d.y);
+      const low   = parseFloat(d.l && d.l!=='-' ? d.l : d.y);
+      const vol   = Math.round(parseFloat(d.v||0));
+      if (!price||price<=0) continue;
+      const chg = prev>0 ? +(price-prev).toFixed(2) : null;
+      const pct = prev>0 && chg!==null ? +(chg/prev*100).toFixed(2) : null;
+      return {price, chg, pct, prev: prev>0?prev:null, vol, high, low, src:'twse-mis'};
+    } catch(e) {}
+  }
+  return null;
 }
 
 // ── 方法B：TWSE OpenAPI 收盤（盤後，無需Key）───────
@@ -788,53 +788,40 @@ async function fetchTWSEClose(code) {
 
   try {
     let urls;
-    // ★ 上櫃：stk_quote_result.php 民國年（直接 return，不走下面 urls 迴圈）
+    // ★ 上櫃：直接用 MIS API（支援 otc_代號.tw，有CORS，不需proxy）
     if (isOTC) {
-      const proxies = [
-        u=>`https://corsproxy.io/?${encodeURIComponent(u)}`,
-        u=>`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-        u=>`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
-      ];
-      // 最多試今日+前3個交易日，每次間隔500ms（不是3秒）
-      for (let back=0; back<=3; back++) {
-        const dx = new Date(tw); dx.setDate(dx.getDate()-back);
-        while(dx.getDay()===0||dx.getDay()===6) dx.setDate(dx.getDate()-1);
-        const roc = `${dx.getFullYear()-1911}/${String(dx.getMonth()+1).padStart(2,'0')}/${String(dx.getDate()).padStart(2,'0')}`;
-        const tpexUrl = `https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&d=${encodeURIComponent(roc)}&stkno=${no}`;
-        for (const mkP of proxies) {
-          try {
-            const r = await fetch(mkP(tpexUrl),{signal:AbortSignal.timeout(8000)});
-            if(!r.ok) continue;
-            const raw = await r.json();
-            const rows = raw.aaData||[];
-            if(!rows.length){ break; } // 該日無資料，試前一日
-            const row = rows.find(r=>(r[0]||'').trim()===no);
-            if(!row){ addLog('warn',`TPEx找不到${no} 民國${roc}`); break; }
-            const cs = (row[2]||'').replace(/,/g,'').trim();
-            if(cs==='---'||!cs){ addLog('warn',`TPEx ${no} ${roc} 無成交`); break; }
-            const price = parseFloat(cs); if(price<=0) continue;
-            const chgRaw = parseFloat((row[3]||'0').replace(/[▲▼+,]/g,'').replace(/▼/,'-'))||0;
-            const prev  = +(price-chgRaw).toFixed(2);
-            const high  = parseFloat((row[5]||cs).replace(/,/g,''))||price;
-            const low   = parseFloat((row[6]||cs).replace(/,/g,''))||price;
-            const vol   = Math.round(parseFloat((row[10]||'0').replace(/,/g,'')))||0;
-            const chg=+(price-prev).toFixed(2), pct=prev>0?+(chg/prev*100).toFixed(2):null;
-            addLog('ok',`✓ TPEx ${no} 民國${roc}: ${price}`);
-            SPARK[code] = [prev, price];
-            return {price,chg,pct,prev,vol,high,low,src:'twse'};
-          } catch(e){ addLog('warn',`TPEx ${no} ${roc}: ${e.message}`); }
-        }
-        if(back<3) await new Promise(r=>setTimeout(r,500));
+      // MIS 盤後仍可取得昨收(y欄位)，直接呼叫不需proxy
+      const misDirect = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_${no}.tw&json=1&delay=0`;
+      const misProxied = `https://corsproxy.io/?${encodeURIComponent(misDirect)}`;
+      for (const target of [misDirect, misProxied]) {
+        try {
+          const r = await fetch(target, {signal:AbortSignal.timeout(7000)});
+          if(!r.ok) continue;
+          const j = await r.json();
+          const d = j?.msgArray?.[0];
+          if(!d) continue;
+          const price = parseFloat(d.z&&d.z!=='-'?d.z:d.y);
+          const prev  = parseFloat(d.y);
+          if(!price||price<=0) continue;
+          const high = parseFloat(d.h&&d.h!=='-'?d.h:d.y)||price;
+          const low  = parseFloat(d.l&&d.l!=='-'?d.l:d.y)||price;
+          const vol  = Math.round(parseFloat(d.v||0));
+          const chg  = prev>0?+(price-prev).toFixed(2):null;
+          const pct  = prev>0&&chg!==null?+(chg/prev*100).toFixed(2):null;
+          addLog('ok',`✓ OTC MIS ${no}: price=${price} prev=${prev}`);
+          SPARK[code] = [prev, price];
+          return {price,chg,pct,prev:prev>0?prev:null,vol,high,low,src:'twse-mis'};
+        } catch(e) { addLog('warn',`OTC MIS ${no}: ${e.message}`); }
       }
-      // proxy全掛 → Gemini fallback
+      // MIS 失敗 → Gemini fallback
       if(geminiKey){
         try{
           const gr=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
             {method:'POST',headers:{'Content-Type':'application/json'},
-             body:JSON.stringify({contents:[{parts:[{text:`台股上櫃代號${no}最近交易日收盤價，只回數字`}]}],generationConfig:{maxOutputTokens:20,temperature:0}})});
+             body:JSON.stringify({contents:[{parts:[{text:`台股上櫃代號${no}今日或最近交易日收盤價，只回數字，不要單位`}]}],generationConfig:{maxOutputTokens:20,temperature:0}})});
           const gd=await gr.json();
           const gp=parseFloat(((gd.candidates?.[0]?.content?.parts||[]).find(x=>x.text)?.text||'').replace(/[^0-9.]/g,''));
-          if(gp>0){addLog('ok',`✓ ${no}[Gemini]${gp}`);return{price:gp,chg:null,pct:null,prev:null,vol:0,high:gp,low:gp,src:'gemini'};}
+          if(gp>0){addLog('ok',`✓ OTC Gemini ${no}: ${gp}`);return{price:gp,chg:null,pct:null,prev:null,vol:0,high:gp,low:gp,src:'gemini'};}
         }catch(e){}
       }
       return null;
@@ -1884,9 +1871,8 @@ function renderTable() {
           <div class="sinfo">
             <span class="scname">${stock.name}</span>
             <span class="tbadge ${stock.type}">${tbadge}</span>
-            <span style="font-size:9px;padding:1px 5px;border-radius:3px;font-weight:600;margin-left:2px;${stock.code.endsWith('.TWO')?'background:rgba(255,171,0,.15);color:#ffab00;border:1px solid rgba(255,171,0,.3)':'background:rgba(0,201,232,.1);color:#00c9e8;border:1px solid rgba(0,201,232,.25)'}">
-              ${stock.code.endsWith('.TWO')?'上櫃':'上市'}
-            </span>
+            <span style="font-size:9px;padding:1px 4px;border-radius:3px;font-weight:700;margin-left:2px;${stock.code.endsWith('.TWO')?'background:rgba(255,171,0,.15);color:#ffab00;border:1px solid rgba(255,171,0,.3)':'background:rgba(0,201,232,.1);color:#00c9e8;border:1px solid rgba(0,201,232,.25)'}">
+              ${stock.code.endsWith('.TWO')?'櫃':'市'}</span>
             <span class="ibadge">${stock.sector}</span>
           </div>
           ${prevClose ? `<div style="font-size:11px;color:var(--text);font-family:var(--mono);margin-top:2px">昨收 ${fmt(prevClose,2)}<span style="font-size:9px;color:var(--text3);margin-left:3px">${prevSrc==="est"?"(估)":""}</span></div>` : ''}
