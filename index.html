@@ -629,64 +629,64 @@ async function fetchFinsWithGemini() {
   addLog('info', `🤖 Gemini 查詢財務資料：${allStocks.length} 檔…`);
   document.getElementById('ref-btn').innerHTML = '<span class="spin">↻</span> 抓財務中…';
 
-  const prompt = '你是台股財務分析師。請查詢以下台股個股最新公開財務資料，以JSON格式回答。個股：' + stockList + '。請回傳JSON格式（只回JSON，不要其他文字）：{"股票代號.TW或.TWO":{"eps_ly":去年全年EPS數字,"eps_ytd":今年累積EPS數字,"gm":最新季毛利率百分比數字,"rev_yoy":最新月營收年增率百分比數字}}。代號對照：' + allStocks.map(s=>s.name+':'+s.code).join(',') + '。資料來源公開財報公開資訊觀測站，只回JSON不要markdown。';
+  // ★ 逐檔查詢 + Google Search Grounding（即時搜尋公開財報，數值準確）
+  const GURL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+  const allParsed = {};
+  let updated = 0;
+  const btn2 = document.getElementById('ref-btn');
+
+  for (let i = 0; i < allStocks.length; i++) {
+    const s = allStocks[i];
+    const no = s.code.replace('.TWO','').replace('.TW','');
+    btn2.innerHTML = `<span class="spin">↻</span> 財務 ${no} (${i+1}/${allStocks.length})`;
+
+    // ★ prompt 明確要求搜尋最新公開資訊觀測站數據
+    const p = `請用Google搜尋台股${no} ${s.name}的最新財務數據，來源為公開資訊觀測站或公司財報，只回傳JSON不要其他文字：{"${s.code}":{"eps_ly":2025年全年EPS數字,"eps_ytd":2026年最新累積EPS數字,"gm":最新一季毛利率百分比數字,"rev_yoy":最新一個月營收年增率百分比數字}}。數值必須來自實際搜尋結果，無法確認填null。`;
+
+    try {
+      const r = await fetch(GURL, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          contents:[{parts:[{text:p}]}],
+          tools:[{"google_search":{}}],  // ★ 啟用 Google Search Grounding
+          generationConfig:{maxOutputTokens:300,temperature:0}
+        })
+      });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error.message);
+      const parts = d.candidates?.[0]?.content?.parts || [];
+      // ★ 找 text 類型的 part（排除 search tool 回傳的其他 part）
+      const txt_raw = (parts.find(x=>x.text!=null)||parts[0])?.text || '';
+      const si = txt_raw.indexOf('{'), ei = txt_raw.lastIndexOf('}');
+      if (si < 0 || ei <= si) { addLog('warn',`財務${no} 非JSON: ${txt_raw.slice(0,80)}`); continue; }
+      const row = JSON.parse(txt_raw.slice(si, ei+1));
+      Object.keys(row).forEach(code => {
+        allParsed[code] = row[code];
+        if (FINS[code]) Object.assign(FINS[code], row[code]);
+        else FINS[code] = row[code];
+        updated++;
+        const f = row[code];
+        addLog('ok', `✅ ${no} EPS去年:${f.eps_ly} 今年:${f.eps_ytd} 毛利:${f.gm}% YOY:${f.rev_yoy}%`);
+      });
+    } catch(e) { addLog('warn',`財務${no} 失敗: ${e.message}`); }
+
+    if (i < allStocks.length - 1) await new Promise(r => setTimeout(r, 1500));
+  }
 
   try {
-    const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-      { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-          contents:[{parts:[{text:prompt}]}],
-          generationConfig:{maxOutputTokens:4096,temperature:0}
-        })
-      }
-    );
-    const d = await r.json();
-    if (d.error) throw new Error(d.error.message);
-    const allParts2 = d.candidates?.[0]?.content?.parts || [];
-    let txt = (allParts2.find(p=>p.text!=null)||allParts2[0])?.text || '';
-    // 清理 markdown：處理 ```json 、json{ 等各種格式
-    txt = txt.replace(/^json\s*/i,'').replace(/```json\s*/gi,'').replace(/```/g,'').trim();
-    // 修復截斷小數 "8." -> "8.0"
-    txt = txt.replace(/:(\s*-?\d+\.)(\s*[,}\n])/g,':$10$2');
-    // 修復截斷結尾
-    if(!txt.endsWith('}')){txt=txt.replace(/,?\s*"[^"]*"\s*:\s*[^,}\]]*$/,'');if(!txt.endsWith('}'))txt+='}';while((txt.match(/{/g)||[]).length>(txt.match(/}/g)||[]).length)txt+='}';}
-    let parsed;
-    try { parsed = JSON.parse(txt); }
-    catch(je) {
-      // 最後嘗試：找第一個 { 到最後一個 } 之間的內容
-      const start=txt.indexOf('{'), end=txt.lastIndexOf('}');
-      if(start>=0&&end>start) parsed=JSON.parse(txt.slice(start,end+1));
-      else throw je;
-    }
-    // 更新 FINS
-    let updated = 0;
-    Object.keys(parsed).forEach(code => {
-      if (FINS[code] !== undefined) {
-        Object.assign(FINS[code], parsed[code]);
-        updated++;
-      } else {
-        FINS[code] = parsed[code];
-        updated++;
-      }
-    });
-    // 快取到 localStorage（30天）
-    localStorage.setItem('fins_cache', JSON.stringify(parsed));
+    localStorage.setItem('fins_cache', JSON.stringify(allParsed));
     localStorage.setItem('fins_cache_date', new Date().toISOString());
-    const updNames = Object.keys(parsed).map(c=>{const s=[...holdStocks,...watchStocks].find(x=>x.code===c);return s?`${c.replace('.TWO','').replace('.TW','')}${s.name}`:c;}).join('、');
-    // 檢查是否有股票未在此次更新中（新加入的股票）
-    const missingFins = allStocks.filter(s => !allParsed[s.code] && !FINS[s.code]?.eps_ly);
-    if (missingFins.length > 0) addLog('warn', `⚠️ 以下股票財務未更新：${missingFins.map(s=>s.name).join('、')}`);
-    addLog('ok', `✅ 財務資料更新完成：${updated} 檔，已快取`);
-    renderTable();
-    alert(`✅ 財務資料更新！已更新 ${updated} 檔：\n${updNames}\n資料來源：Gemini AI`);
-  } catch(e) {
-    addLog('err', `❌ 財務資料抓取失敗：${e.message}`);
-    alert(`財務資料抓取失敗：${e.message}
-請確認 Gemini API Key 有效`);
-  } finally {
-    document.getElementById('ref-btn').innerHTML = '↻ 抓取報價';
-  }
+  } catch(e) {}
+
+  const updNames = Object.keys(allParsed).map(c => {
+    const s = [...holdStocks,...watchStocks].find(x=>x.code===c);
+    return s ? `${c.replace('.TWO','').replace('.TW','')} ${s.name}` : c;
+  }).join('、');
+
+  renderTable();
+  btn2.innerHTML = '↻ 抓取報價';
+  addLog('ok', `✅ 財務查詢完成：${updated} 檔（Google Search Grounding）`);
+  alert(`✅ 財務更新完成！已更新 ${updated} 檔：\n${updNames}\n資料來源：Gemini + Google Search（即時搜尋）`);
 }
 
 // ── STATE ────────────────────────────────────────────────
@@ -1820,12 +1820,8 @@ function renderTable() {
     // 昨收：優先用API的chartPreviousClose，次選反推，並標示可靠度
     const prevClose = (() => {
     if (!pd) return null;
-    // src='twse': price=今收, prev=昨收 → 顯示 prev
-    // src='twse-mis'/'yahoo'/'cache': price=即時, prev=昨收 → 顯示 prev
-    if (pd.prev && pd.prev > 0) return pd.prev;
-    // 若 prev 為空且 src=cache（技術指標快取），price 本身就是昨收
-    if (pd.src === 'cache') return pd.price;
-    return null;
+    if (pd.src === 'twse') return pd.price;
+    return (pd.prev && pd.prev > 0) ? pd.prev : null;
   })();
     const prevSrc   = pd?.prev ? 'API' : 'est';  // API=直接取得 est=反推估算
 
