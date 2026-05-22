@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -630,51 +629,64 @@ async function fetchFinsWithGemini() {
   addLog('info', `🤖 Gemini 查詢財務資料：${allStocks.length} 檔…`);
   document.getElementById('ref-btn').innerHTML = '<span class="spin">↻</span> 抓財務中…';
 
-  // ★ 逐檔查詢，每次只查1檔，maxOutputTokens:200 絕對不截斷
-  const GURL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
-  const allParsed = {};
-  let updated = 0;
-  const btn2 = document.getElementById('ref-btn');
-
-  for (let i = 0; i < allStocks.length; i++) {
-    const s = allStocks[i];
-    const no = s.code.replace('.TWO','').replace('.TW','');
-    btn2.innerHTML = `<span class="spin">↻</span> 財務 ${no} (${i+1}/${allStocks.length})`;
-    const p = `查台股${no} ${s.name}最新財務，只回JSON不要其他文字：{"${s.code}":{"eps_ly":去年全年EPS數字,"eps_ytd":今年累積EPS數字,"gm":最新季毛利率數字,"rev_yoy":最新月營收年增率數字}}。無法確認填null。`;
-    try {
-      const r = await fetch(GURL, {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({contents:[{parts:[{text:p}]}], generationConfig:{maxOutputTokens:200,temperature:0}})});
-      const d = await r.json();
-      if (d.error) { addLog('warn',`財務${no}: ${d.error.message}`); continue; }
-      const pts = d.candidates?.[0]?.content?.parts || [];
-      let txt = (pts.find(x=>x.text!=null)||pts[0])?.text || '';
-      const si2 = txt.indexOf('{'), ei2 = txt.lastIndexOf('}');
-      if (si2 < 0 || ei2 <= si2) { addLog('warn',`財務${no} 非JSON`); continue; }
-      const row = JSON.parse(txt.slice(si2, ei2+1));
-      Object.keys(row).forEach(code => {
-        allParsed[code] = row[code];
-        if (FINS[code]) Object.assign(FINS[code], row[code]);
-        else FINS[code] = row[code];
-        updated++;
-        const f = row[code];
-        addLog('ok', `✅ ${no} EPS:${f.eps_ly}/${f.eps_ytd} 毛:${f.gm}% YOY:${f.rev_yoy}%`);
-      });
-    } catch(e) { addLog('warn',`財務${no} 失敗: ${e.message}`); }
-    if (i < allStocks.length - 1) await new Promise(r => setTimeout(r, 1000));
-  }
+  const prompt = '你是台股財務分析師。請查詢以下台股個股最新公開財務資料，以JSON格式回答。個股：' + stockList + '。請回傳JSON格式（只回JSON，不要其他文字）：{"股票代號.TW或.TWO":{"eps_ly":去年全年EPS數字,"eps_ytd":今年累積EPS數字,"gm":最新季毛利率百分比數字,"rev_yoy":最新月營收年增率百分比數字}}。代號對照：' + allStocks.map(s=>s.name+':'+s.code).join(',') + '。資料來源公開財報公開資訊觀測站，只回JSON不要markdown。';
 
   try {
-    localStorage.setItem('fins_cache', JSON.stringify(allParsed));
+    const r = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+      { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          contents:[{parts:[{text:prompt}]}],
+          generationConfig:{maxOutputTokens:4096,temperature:0}
+        })
+      }
+    );
+    const d = await r.json();
+    if (d.error) throw new Error(d.error.message);
+    const allParts2 = d.candidates?.[0]?.content?.parts || [];
+    let txt = (allParts2.find(p=>p.text!=null)||allParts2[0])?.text || '';
+    // 清理 markdown：處理 ```json 、json{ 等各種格式
+    txt = txt.replace(/^json\s*/i,'').replace(/```json\s*/gi,'').replace(/```/g,'').trim();
+    // 修復截斷小數 "8." -> "8.0"
+    txt = txt.replace(/:(\s*-?\d+\.)(\s*[,}\n])/g,':$10$2');
+    // 修復截斷結尾
+    if(!txt.endsWith('}')){txt=txt.replace(/,?\s*"[^"]*"\s*:\s*[^,}\]]*$/,'');if(!txt.endsWith('}'))txt+='}';while((txt.match(/{/g)||[]).length>(txt.match(/}/g)||[]).length)txt+='}';}
+    let parsed;
+    try { parsed = JSON.parse(txt); }
+    catch(je) {
+      // 最後嘗試：找第一個 { 到最後一個 } 之間的內容
+      const start=txt.indexOf('{'), end=txt.lastIndexOf('}');
+      if(start>=0&&end>start) parsed=JSON.parse(txt.slice(start,end+1));
+      else throw je;
+    }
+    // 更新 FINS
+    let updated = 0;
+    Object.keys(parsed).forEach(code => {
+      if (FINS[code] !== undefined) {
+        Object.assign(FINS[code], parsed[code]);
+        updated++;
+      } else {
+        FINS[code] = parsed[code];
+        updated++;
+      }
+    });
+    // 快取到 localStorage（30天）
+    localStorage.setItem('fins_cache', JSON.stringify(parsed));
     localStorage.setItem('fins_cache_date', new Date().toISOString());
-  } catch(e) {}
-
-  const updNames = Object.keys(allParsed).map(c => {
-    const s = [...holdStocks,...watchStocks].find(x=>x.code===c);
-    return s ? `${c.replace('.TWO','').replace('.TW','')} ${s.name}` : c;
-  }).join('、');
-  renderTable();
-  btn2.innerHTML = '↻ 抓取報價';
-  alert(`✅ 財務更新完成！已更新 ${updated} 檔：\n${updNames}`);
+    const updNames = Object.keys(parsed).map(c=>{const s=[...holdStocks,...watchStocks].find(x=>x.code===c);return s?`${c.replace('.TWO','').replace('.TW','')}${s.name}`:c;}).join('、');
+    // 檢查是否有股票未在此次更新中（新加入的股票）
+    const missingFins = allStocks.filter(s => !allParsed[s.code] && !FINS[s.code]?.eps_ly);
+    if (missingFins.length > 0) addLog('warn', `⚠️ 以下股票財務未更新：${missingFins.map(s=>s.name).join('、')}`);
+    addLog('ok', `✅ 財務資料更新完成：${updated} 檔，已快取`);
+    renderTable();
+    alert(`✅ 財務資料更新！已更新 ${updated} 檔：\n${updNames}\n資料來源：Gemini AI`);
+  } catch(e) {
+    addLog('err', `❌ 財務資料抓取失敗：${e.message}`);
+    alert(`財務資料抓取失敗：${e.message}
+請確認 Gemini API Key 有效`);
+  } finally {
+    document.getElementById('ref-btn').innerHTML = '↻ 抓取報價';
+  }
 }
 
 // ── STATE ────────────────────────────────────────────────
@@ -1171,10 +1183,18 @@ async function fetchOne(code) {
       if (result) addLog('ok',`✓ ${code} [Yahoo] ${result.price}`);
     }
     if (result) {
+      // 盤後模式（TWSE Close）：
+      //   result.price = 最新交易日收盤（昨收）
+      //   result.prev  = 前天收盤（用來算昨天漲跌）
+      // 盤中模式（MIS/Yahoo）：
+      //   result.price = 即時價格
+      //   result.prev  = 昨收（需要確保正確）
+
       if (result.src === 'twse') {
-        // 盤後：price 就是昨收，prev 是前天
+        // 盤後：price 就是昨收，不需要額外補抓
+        // prev 是前天，chg/pct 已正確計算
       } else if (!result.prev || result.prev <= 0) {
-        // 盤中：補抓昨收
+        // 盤中：prev 為空，補抓昨收
         const p = await fetchPrevClose(code);
         if (p && p > 0) {
           result.prev = p;
@@ -1184,25 +1204,6 @@ async function fetchOne(code) {
       }
       return result;
     }
-
-    // ★★ 所有 proxy 失敗：從 techCache 取最後收盤（最可靠的官方數據備援）
-    // techCache 由 fetchMonthlyOHLCV 計算，使用官方月線端點，準確度最高
-    if (techCache[code]?.lastClose > 0) {
-      const lc = techCache[code].lastClose;
-      addLog('ok', `✓ ${code} [技術指標快取] lastClose=${lc}`);
-      return {price: lc, chg: null, pct: null, prev: null, vol: 0, high: lc, low: lc, src: 'cache'};
-    }
-
-    // ★★ techCache 也沒有：先抓技術指標（會同時取得 lastClose），再回傳
-    try {
-      const ind = await fetchTechIndicators(code);
-      if (ind?.lastClose > 0) {
-        const lc = ind.lastClose;
-        addLog('ok', `✓ ${code} [技術指標新算] lastClose=${lc}`);
-        return {price: lc, chg: null, pct: null, prev: null, vol: 0, high: lc, low: lc, src: 'cache'};
-      }
-    } catch(e) {}
-
   } else {
     // 美股：Finnhub → Yahoo
     if (finnhubKey) {
@@ -1819,8 +1820,12 @@ function renderTable() {
     // 昨收：優先用API的chartPreviousClose，次選反推，並標示可靠度
     const prevClose = (() => {
     if (!pd) return null;
-    if (pd.src === 'twse') return pd.price;
-    return (pd.prev && pd.prev > 0) ? pd.prev : null;
+    // src='twse': price=今收, prev=昨收 → 顯示 prev
+    // src='twse-mis'/'yahoo'/'cache': price=即時, prev=昨收 → 顯示 prev
+    if (pd.prev && pd.prev > 0) return pd.prev;
+    // 若 prev 為空且 src=cache（技術指標快取），price 本身就是昨收
+    if (pd.src === 'cache') return pd.price;
+    return null;
   })();
     const prevSrc   = pd?.prev ? 'API' : 'est';  // API=直接取得 est=反推估算
 
