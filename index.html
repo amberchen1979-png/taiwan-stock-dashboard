@@ -597,11 +597,14 @@ let FINS = {
 
 // 載入已快取的財務資料（覆蓋模擬資料）
 (function loadCachedFins() {
+  // ★ 自動為所有持股/觀察股初始化 FINS（新增個股不需手動加）
+  [...(typeof holdStocks!=='undefined'?holdStocks:[]),
+   ...(typeof watchStocks!=='undefined'?watchStocks:[])]
+  .forEach(s=>{ if(!FINS[s.code]) FINS[s.code]={eps_ly:null,eps_ytd:null,gm:null,rev_yoy:null}; });
   try {
     const cached = localStorage.getItem('fins_cache');
     if (cached) {
       const parsed = JSON.parse(cached);
-      // 只更新非 null 的欄位，保留 ETF 的 null 設定
       Object.keys(parsed).forEach(code => {
         if (FINS[code]) Object.assign(FINS[code], parsed[code]);
         else FINS[code] = parsed[code];
