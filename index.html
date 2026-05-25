@@ -666,17 +666,23 @@ async function fetchFinsWithGemini() {
 資料：${searchTxt}
 格式：{"${s.code}":{"eps_ly":2025全年EPS數字,"eps_ytd":2026累積EPS數字,"gm":最新季毛利率數字,"rev_yoy":最新月營收年增率數字}}
 key必須是"${s.code}"，無法確認填null，只回JSON。`}]}],
-          generationConfig:{maxOutputTokens:200,temperature:0}
+          generationConfig:{maxOutputTokens:400,temperature:0}
         })
       });
       const d2 = await r2.json();
       if (d2.error) throw new Error(`Format: ${d2.error.message}`);
       const txt2 = (d2.candidates?.[0]?.content?.parts||[]).map(x=>x.text||'').join('').trim();
       addLog('info', `${no} raw: ${txt2.slice(0,150)}`);
-      const txt2c = txt2.replace(/```json/g,'').replace(/```/g,'').trim();
-      const si = txt2c.indexOf('{'), ei = txt2c.lastIndexOf('}');
-if (si<0||ei<=si) { addLog('warn',`${no} 找不到JSON: ${txt2c.slice(0,80)}`); continue; }
-let row = JSON.parse(txt2c.slice(si,ei+1));
+      let txt2c = txt2.replace(/```json/g,'').replace(/```/g,'').trim();
+      const si = txt2c.indexOf('{');
+      let ei = txt2c.lastIndexOf('}');
+      if (ei < si) {
+        // JSON 被截斷，嘗試補全
+        txt2c = txt2c.slice(si) + '}}';
+        ei = txt2c.lastIndexOf('}');
+      }
+      if (si<0||ei<=si) { addLog('warn',`${no} 找不到JSON: ${txt2c.slice(0,80)}`); continue; }
+      let row = JSON.parse(txt2c.slice(si,ei+1));
 
       // ★ key 對齊：Gemini 可能回傳 "6261" 或 "6261.TW"，統一轉成正確的 s.code
       const rowKeys = Object.keys(row);
