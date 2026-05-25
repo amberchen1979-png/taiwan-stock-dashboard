@@ -673,9 +673,10 @@ key必須是"${s.code}"，無法確認填null，只回JSON。`}]}],
       if (d2.error) throw new Error(`Format: ${d2.error.message}`);
       const txt2 = (d2.candidates?.[0]?.content?.parts||[]).map(x=>x.text||'').join('').trim();
       addLog('info', `${no} raw: ${txt2.slice(0,150)}`);
-      const si = txt2.indexOf('{'), ei = txt2.lastIndexOf('}');
-      if (si<0||ei<=si) { addLog('warn',`${no} 找不到JSON: ${txt2.slice(0,80)}`); continue; }
-      let row = JSON.parse(txt2.slice(si,ei+1));
+      const txt2c = txt2.replace(/```json/g,'').replace(/```/g,'').trim();
+      const si = txt2c.indexOf('{'), ei = txt2c.lastIndexOf('}');
+if (si<0||ei<=si) { addLog('warn',`${no} 找不到JSON: ${txt2c.slice(0,80)}`); continue; }
+let row = JSON.parse(txt2c.slice(si,ei+1));
 
       // ★ key 對齊：Gemini 可能回傳 "6261" 或 "6261.TW"，統一轉成正確的 s.code
       const rowKeys = Object.keys(row);
