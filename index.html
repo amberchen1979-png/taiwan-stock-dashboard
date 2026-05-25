@@ -948,10 +948,10 @@ async function fetchTWSEInst(dateStr) {
     const result = {};
     j.data.forEach(row => {
       const no  = (row[0]||'').trim();
-      const f   = parseInt((row[4]||'0').replace(/,/g,''))||0;   // 外資買賣超
-      const i   = parseInt((row[7]||'0').replace(/,/g,''))||0;   // 投信買賣超
-      const d2  = parseInt((row[14]||'0').replace(/,/g,''))||0;  // 自營商合計（[14]）
-      const net = parseInt((row[15]||'0').replace(/,/g,''))||0;  // 三大法人合計（[15]）
+      const f   = parseInt((row[3]||'0').replace(/,/g,''))||0;   // 外陸資買賣超張數 [3]
+      const i   = parseInt((row[9]||'0').replace(/,/g,''))||0;   // 投信買賣超張數 [9]
+      const d2  = parseInt((row[12]||'0').replace(/,/g,''))||0;  // 自營商買賣超（自行）[12]
+      const net = parseInt((row[16]||'0').replace(/,/g,''))||0;  // 三大法人合計買賣超 [16]
       if (no) result[no] = {f, i, d:d2, net, src:'twse'};
     });
     addLog('ok', 'TWSE三大法人：'+Object.keys(result).length+' 筆');
@@ -2309,53 +2309,35 @@ async function runAI(code, name, sector) {
     return parts.join('；') || '計算中';
   })();
   const modeInstr = currentMode === 'before'
-    ? `你必須依序完整撰寫以下全部5個段落，每段20-50字，即使數據不足也須給出合理推論，嚴禁省略任何段落，否則視為輸出失敗。
+    ? `請依序輸出以下5個段落，每段以【標題】開頭，每段50-100字，不可省略任何段落：
 
-【技術形態與開盤預判】
-技術指標現況：${techDetail_pre}
-根據昨收${pd?.prev??'—'}元與上述指標，判斷今日開盤方向（偏多/偏空/中性），說明關鍵支撐與壓力位。
+【技術形態與開盤預判】請根據以下數據分析：昨收${pd?.prev??'—'}元，技術指標：${techDetail_pre}。判斷今日開盤偏多/偏空/中性，說明關鍵支撐與壓力位。
 
-【總體經濟影響】
-產業：${sector||stock?.sector||'不明'}
-說明當前總經環境（美股、匯率、利率走向）對此產業的具體影響，給出利多或利空明確結論。
+【總體經濟影響】產業為${sector||stock?.sector||'不明'}。說明當前美股、匯率、利率環境對此產業的具體影響，給出利多或利空明確結論。
 
-【法人籌碼方向】
-實際法人數據：${instStr_pre}
-依據上述數值解讀外資、投信、自營商各自方向及三大合計含意，判斷籌碼偏多或偏空。
+【法人籌碼方向】法人數據：${instStr_pre}。依據以上數值分析外資、投信、自營商各自方向，判斷整體籌碼偏多或偏空。
 
-【操作建議】
-綜合以上分析，明確給出「買進/持有/觀察/賣出」其中一個，說明建議進場價位與理由，20-40字。
+【操作建議】綜合技術面與籌碼面，明確給出買進/持有/觀察/賣出其中一個，說明建議價位與理由。
 
-【主要風險】
-列出2-3個具體下行風險點，每點10-20字。`
-    : `你必須依序完整撰寫以下全部6個段落，每段20-50字，即使數據不足也須給出合理推論，嚴禁省略任何段落，否則視為輸出失敗。
+【主要風險】列出2-3個具體下行風險點。`
+    : `請依序輸出以下6個段落，每段以【標題】開頭，每段50-100字，不可省略任何段落：
 
-【今日量價複盤】
-今日收盤${pd?.price??'—'}元，成交量${pd?fmt(pd.vol,0)+'張':'—'}，區間${pd?pd.low+'～'+pd.high:'—'}元。
-分析今日量價走勢含意，說明多方或空方力道強弱。
+【今日量價複盤】今日數據：收盤${pd?.price??'—'}元，成交量${pd?fmt(pd.vol,0)+'張':'—'}，區間${pd?pd.low+'～'+pd.high:'—'}元。分析量價走勢含意，說明多空力道強弱。
 
-【技術指標現況】
-實際指標數據：${techDetail_pre}
-依序分析：①MACD（DIF與DEA多空排列，有無金叉死叉）②KD（K值是否超買>80或超賣<20，有無交叉訊號）③RSI（數值區間，操作提示）④布林通道（股價在上中下軌哪個位置，帶寬收縮或擴張）。最後綜合給出「技術面偏多/偏空/中性」的最佳決策建議。
+【技術指標現況】指標數據：${techDetail_pre}。依序分析MACD多空排列與金叉死叉、KD超買超賣與交叉訊號、RSI數值區間操作提示、布林通道股價位置與帶寬狀態，最後給出技術面偏多/偏空/中性的最佳決策建議。
 
-【法人買賣超解讀】
-實際法人數據：${instStr_pre}
-依據上述數值，分析外資、投信、自營商各自方向，解讀三大法人合計對後市股價的影響。
+【法人買賣超解讀】法人數據：${instStr_pre}。分析外資、投信、自營商各自買賣方向，解讀三大法人合計張數對後市的影響與含意。
 
-【財務數據評估】
-EPS去年${fin2.eps_ly??'—'}元 / 今年累積${fin2.eps_ytd??'—'}元，毛利率${fin2.gm??'—'}%，營收YOY ${fin2.rev_yoy??'—'}%。
-評估基本面強弱，給出財務面結論。
+【財務數據評估】財務數據：EPS去年${fin2.eps_ly??'—'}元/今年累積${fin2.eps_ytd??'—'}元，毛利率${fin2.gm??'—'}%，營收YOY ${fin2.rev_yoy??'—'}%。評估基本面強弱，給出財務面結論。
 
-【明日操作策略】
-明確給出「買進/持有/觀察/賣出」其中一個，含建議進場價位與停損點，20-40字。
+【明日操作策略】明確給出買進/持有/觀察/賣出其中一個，含建議進場價位與停損點。
 
-【評分說明】
-本次綜合評分${sc.score}/100，說明主要加分或扣分原因，20-30字。`;
+【評分說明】本次評分${sc.score}/100，說明主要加分或扣分原因。`;
 
   const instRaw3  = getInstData(code);
   const instStr   = instRaw3 ? `三大法人合計${instRaw3.net>=0?'+':''}${instRaw3.net}張（外資${instRaw3.f>=0?'+':''}${instRaw3.f}，投信${instRaw3.i>=0?'+':''}${instRaw3.i}，自營${instRaw3.d>=0?'+':''}${instRaw3.d}）` : '尚未取得';
 
-  const prompt = `你是專業台股分析師。核心規則：每個指定段落都必須寫出完整內容，數據不足時給出合理推論，嚴禁省略任何段落，否則視為輸出失敗。請用繁體中文撰寫以下個股的${modeStr}分析報告，總字數300-500字。
+  const prompt = `以下是台股個股資料，請根據最後的分析指令逐段輸出報告。
 
 【個股資訊】
 代號：${code.replace('.TWO','').replace('.TW','')} ${name}　產業：${sector||stock?.sector||'不明'}
@@ -2369,8 +2351,7 @@ EPS(去年/今年累積)：${fin2.eps_ly??'—'} / ${fin2.eps_ytd??'—'}　毛�
 資料來源：${priceData[code]?.src==='twse-mis'?'TWSE即時':priceData[code]?.src==='twse'?'TWSE收盤':priceData[code]?.src==='yahoo'?'Yahoo Finance':'模擬資料'}
 
 ${modeInstr}
-
-最後必須明確給出：「建議動作：買進/持有/觀察/賣出」並說明理由和停損點。`;
+`;
 
   // ── 建立 Artifact 視窗 ──
   // 移除舊視窗
@@ -2436,9 +2417,9 @@ ${modeInstr}
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        system_instruction: {parts: [{text: '你是專業台股分析師。所有分析報告必須全程使用繁體中文撰寫，嚴禁輸出英文句子或段落。每份報告字數須在300至500字之間，以完整段落格式呈現，每段至少2-3句話，不可以條列式或過短摘要取代。'}]},
+        system_instruction: {parts: [{text: '你是專業台股分析師。規則：①全程繁體中文。②每個【標題】段落都必須輸出，每段50-100字，總字數400-600字。③嚴禁省略任何段落，否則視為失敗。④輸出格式：每個段落以【標題】開頭，內容緊接在後，段落間空一行。'}]},
         contents: [{parts: [{text: prompt}]}],
-        generationConfig: {maxOutputTokens: 2000, temperature: 0.5}
+        generationConfig: {maxOutputTokens: 3000, temperature: 0.4}
       })
     });
     if (!r.ok) {
