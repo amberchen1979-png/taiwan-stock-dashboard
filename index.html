@@ -647,7 +647,7 @@ async function fetchFinsWithGemini() {
         body: JSON.stringify({
           contents:[{parts:[{text:`台股${no} ${s.name} 最新財務：2025全年EPS、2026累積EPS、最新季毛利率%、最新月營收年增率%`}]}],
           tools:[{"google_search":{}}],
-          generationConfig:{maxOutputTokens:500,temperature:0}
+          generationConfig:{maxOutputTokens:2048,temperature:0}
         })
       });
       const d1 = await r1.json();
