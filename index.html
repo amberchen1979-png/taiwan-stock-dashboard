@@ -261,7 +261,9 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
     </div>
     <button class="key-indicator icon-btn" id="gemini-key-btn" onclick="openKeyPanel()" title="設定 Gemini API Key"><span id="gemini-dot" style="width:7px;height:7px;border-radius:50%;background:var(--text3)"></span> <span id="gemini-key-label">AI 未設定</span></button>
     <button class="icon-btn" onclick="openMgr()" style="border-color:rgba(0,201,232,.5);color:var(--accent)">⚙ 管理個股</button>
-    <button class="icon-btn" onclick="fetchFinsWithGemini()" style="border-color:rgba(255,171,0,.5);color:var(--warn)" title="用 Gemini AI 自動查詢最新 EPS/毛利率/營收YOY">📊 抓財務</button>
+    <button class="icon-btn" onclick="exportSettings()" style="border-color:rgba(160,200,255,.4);color:#a0c8ff" title="匯出設定 JSON，可在其他裝置匯入">📤 匯出設定</button>
+    <label class="icon-btn" style="border-color:rgba(160,200,255,.4);color:#a0c8ff;cursor:pointer" title="匯入 JSON 設定檔，同步個股清單到此裝置">📥 匯入設定<input type="file" accept=".json" onchange="importSettings(event)" style="display:none"></label>
+    <button class="icon-btn" id="fins-btn" onclick="fetchFinsWithGemini()" style="border-color:rgba(255,171,0,.5);color:var(--warn)" title="用 Gemini AI 自動查詢最新 EPS/毛利率/營收YOY">📊 抓財務<span id="fins-date-label" style="font-size:9px;margin-left:5px;color:#8aa8c8;font-weight:400"></span></button>
     <button class="icon-btn" id="ref-btn" onclick="fetchAllPrices()" style="border-color:rgba(0,201,232,.5);color:var(--accent)">↻ 抓取報價</button>
   </div>
 </div>
@@ -372,9 +374,16 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
 </div>
 
 <!-- LOG -->
-<div class="log-toggle" onclick="toggleLog()">
-  <span id="log-arrow">▶</span> API 抓取紀錄
-  <span id="log-count" style="font-size:10px;background:var(--bg4);padding:1px 7px;border-radius:10px;margin-left:4px">0</span>
+<div class="log-toggle" onclick="toggleLog()" style="justify-content:space-between">
+  <div style="display:flex;align-items:center;gap:5px">
+    <span id="log-arrow">▶</span> API 抓取紀錄
+    <span id="log-count" style="font-size:10px;background:var(--bg4);padding:1px 7px;border-radius:10px;margin-left:4px">0筆</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:6px">
+    <span style="font-size:10px;color:var(--text3)">Gemini 本日用量：</span>
+    <span id="gemini-call-count" style="font-size:11px;font-family:var(--mono);font-weight:700;color:#ffab00;background:rgba(255,171,0,.1);border:1px solid rgba(255,171,0,.25);padding:1px 9px;border-radius:10px">0 次</span>
+    <button onclick="event.stopPropagation();resetGeminiCount()" style="font-size:9px;padding:1px 6px;background:transparent;border:1px solid var(--border2);color:var(--text3);border-radius:4px;cursor:pointer" title="重置今日計數">重置</button>
+  </div>
 </div>
 <div class="fetch-log" id="fetch-log"></div>
 
@@ -654,6 +663,7 @@ async function fetchFinsWithGemini() {
         })
       });
       const d1 = await r1.json();
+      addGeminiCall(1);  // 計費：Google Search Grounding
       if (d1.error) throw new Error(`Search: ${d1.error.message}`);
       const searchTxt = (d1.candidates?.[0]?.content?.parts||[]).map(x=>x.text||'').join(' ').trim();
       addLog('info', `${no} 搜尋: ${searchTxt.slice(0,100)}`);
@@ -673,6 +683,7 @@ key必須是"${s.code}"，無法確認填null，只回JSON。`}]}],
         })
       });
       const d2 = await r2.json();
+      addGeminiCall(1);  // 計費：JSON 格式化
       if (d2.error) throw new Error(`Format: ${d2.error.message}`);
       const txt2 = (d2.candidates?.[0]?.content?.parts||[]).map(x=>x.text||'').join('').trim();
       addLog('info', `${no} raw: ${txt2.slice(0,150)}`);
@@ -710,6 +721,7 @@ key必須是"${s.code}"，無法確認填null，只回JSON。`}]}],
   try {
     localStorage.setItem('fins_cache', JSON.stringify(allParsed));
     localStorage.setItem('fins_cache_date', new Date().toISOString());
+    updateFinsDateLabel();
   } catch(e) {}
 
   const updNames = Object.keys(allParsed).map(c=>{
@@ -857,7 +869,7 @@ async function fetchTWSEClose(code) {
              body:JSON.stringify({contents:[{parts:[{text:`台股上櫃代號${no}今日或最近交易日收盤價，只回數字，不要單位`}]}],generationConfig:{maxOutputTokens:20,temperature:0}})});
           const gd=await gr.json();
           const gp=parseFloat(((gd.candidates?.[0]?.content?.parts||[]).find(x=>x.text)?.text||'').replace(/[^0-9.]/g,''));
-          if(gp>0){addLog('ok',`✓ OTC Gemini ${no}: ${gp}`);return{price:gp,chg:null,pct:null,prev:null,vol:0,high:gp,low:gp,src:'gemini'};}
+          if(gp>0){addGeminiCall(1);addLog('ok',`✓ OTC Gemini ${no}: ${gp}`);return{price:gp,chg:null,pct:null,prev:null,vol:0,high:gp,low:gp,src:'gemini'};}
         }catch(e){}
       }
       return null;
@@ -936,10 +948,10 @@ async function fetchTWSEInst(dateStr) {
     const result = {};
     j.data.forEach(row => {
       const no  = (row[0]||'').trim();
-      const f   = parseInt((row[4]||'0').replace(/,/g,''))||0;
-      const i   = parseInt((row[7]||'0').replace(/,/g,''))||0;
-      const d2  = parseInt((row[10]||'0').replace(/,/g,''))||0;
-      const net = parseInt((row[11]||'0').replace(/,/g,''))||0;
+      const f   = parseInt((row[4]||'0').replace(/,/g,''))||0;   // 外資買賣超
+      const i   = parseInt((row[7]||'0').replace(/,/g,''))||0;   // 投信買賣超
+      const d2  = parseInt((row[14]||'0').replace(/,/g,''))||0;  // 自營商合計（[14]）
+      const net = parseInt((row[15]||'0').replace(/,/g,''))||0;  // 三大法人合計（[15]）
       if (no) result[no] = {f, i, d:d2, net, src:'twse'};
     });
     addLog('ok', 'TWSE三大法人：'+Object.keys(result).length+' 筆');
@@ -1188,7 +1200,7 @@ async function fetchPrevClose(code) {
     }
   } catch(e) {}
 
-  if(geminiKey){try{const gr=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:`台股代號${no}最近交易日收盤價，只回數字`}]}],generationConfig:{maxOutputTokens:20,temperature:0}})});const gd=await gr.json();const gp=parseFloat(((gd.candidates?.[0]?.content?.parts||[]).find(x=>x.text)?.text||'').replace(/[^0-9.]/g,''));if(gp>0){addLog('ok',`昨收[Gemini]${code}:${gp}`);return gp;}}catch(e){}}
+  if(geminiKey){try{const gr=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:`台股代號${no}最近交易日收盤價，只回數字`}]}],generationConfig:{maxOutputTokens:20,temperature:0}})});const gd=await gr.json();const gp=parseFloat(((gd.candidates?.[0]?.content?.parts||[]).find(x=>x.text)?.text||'').replace(/[^0-9.]/g,''));if(gp>0){addGeminiCall(1);addLog('ok',`昨收[Gemini]${code}:${gp}`);return gp;}}catch(e){}}
   addLog('warn', `昨收無法取得: ${code}`);
   return null;
 }
@@ -1307,6 +1319,36 @@ async function fetchAllPrices() {
 }
 
 // ── LOG ──────────────────────────────────────────────────
+// ── Gemini 呼叫計數 ──────────────────────────────────────
+let geminiCallCount = (()=>{
+  try {
+    const saved = JSON.parse(localStorage.getItem('gemini_call_count')||'{}');
+    const today = new Date().toLocaleDateString('zh-TW');
+    return saved.date === today ? (saved.count||0) : 0;
+  } catch(e) { return 0; }
+})();
+function addGeminiCall(n=1) {
+  geminiCallCount += n;
+  try {
+    const today = new Date().toLocaleDateString('zh-TW');
+    localStorage.setItem('gemini_call_count', JSON.stringify({date:today, count:geminiCallCount}));
+  } catch(e) {}
+  const el = document.getElementById('gemini-call-count');
+  if (el) {
+    el.textContent = geminiCallCount + ' 次';
+    el.style.color = geminiCallCount >= 200 ? '#ff4f4f' : geminiCallCount >= 100 ? '#ffab00' : '#00e676';
+    el.style.borderColor = geminiCallCount >= 200 ? 'rgba(255,79,79,.3)' : geminiCallCount >= 100 ? 'rgba(255,171,0,.25)' : 'rgba(0,230,118,.25)';
+    el.style.background  = geminiCallCount >= 200 ? 'rgba(255,79,79,.1)' : geminiCallCount >= 100 ? 'rgba(255,171,0,.1)' : 'rgba(0,230,118,.08)';
+  }
+}
+function resetGeminiCount() {
+  if (!confirm('確定重置今日 Gemini 使用計數？')) return;
+  geminiCallCount = 0;
+  try { localStorage.removeItem('gemini_call_count'); } catch(e) {}
+  addGeminiCall(0);
+  addLog('info', '🔄 Gemini 計數已重置');
+}
+
 function addLog(type, msg) {
   const el  = document.getElementById('fetch-log');
   const div = document.createElement('div');
@@ -1314,11 +1356,11 @@ function addLog(type, msg) {
   div.textContent = `[${new Date().toLocaleTimeString('zh-TW')}] ${msg}`;
   el.appendChild(div);
   el.scrollTop = el.scrollHeight;
-  document.getElementById('log-count').textContent = el.children.length;
+  document.getElementById('log-count').textContent = el.children.length + '筆';
 }
 function clearLog() {
   document.getElementById('fetch-log').innerHTML = '';
-  document.getElementById('log-count').textContent = '0';
+  document.getElementById('log-count').textContent = '0筆';
 }
 function toggleLog() {
   const el = document.getElementById('fetch-log');
@@ -2252,14 +2294,68 @@ async function runAI(code, name, sector) {
   const fin2 = FINS[code] || {};
   const modeStr   = currentMode === 'before' ? '盤前' : '盤後';
   const modeColor = currentMode === 'before' ? '#00c9e8' : '#00e676';
+  const instRaw3_pre = getInstData(code);
+  const instStr_pre  = instRaw3_pre
+    ? `外資${instRaw3_pre.f>=0?'+':''}${instRaw3_pre.f}張，投信${instRaw3_pre.i>=0?'+':''}${instRaw3_pre.i}張，自營${instRaw3_pre.d>=0?'+':''}${instRaw3_pre.d}張，三大合計${instRaw3_pre.net>=0?'+':''}${instRaw3_pre.net}張`
+    : '尚未取得（請先執行抓取報價）';
+  const techDetail_pre = (()=>{
+    const c=techCache[code];
+    if(!c) return '尚未取得（請先執行抓取報價）';
+    const{macd,kd,rsi,bb}=c; const parts=[];
+    if(macd) parts.push(`MACD：DIF=${macd.dif} DEA=${macd.dea} 柱=${macd.bar}，${macd.dif>macd.dea?'多頭排列':'空頭排列'}${macd.cross?'，'+macd.cross:''}`);
+    if(kd)   parts.push(`KD：K=${kd.k} D=${kd.d}，${kd.zone}${kd.cross?'，'+kd.cross:''}`);
+    if(rsi)  parts.push(`RSI=${rsi.value}，${rsi.zone}，${rsi.signal}`);
+    if(bb)   parts.push(`布林：%B=${bb.pb}%，${bb.pos}，${bb.squeeze}`);
+    return parts.join('；') || '計算中';
+  })();
   const modeInstr = currentMode === 'before'
-    ? '請依序分析：\n【技術形態與開盤預判】昨收與今日預判方向，關鍵支撐壓力\n【總體經濟影響】產業相關總經因素\n【法人籌碼方向】三大法人動態解讀\n【操作建議】明確說明建議動作（買進/持有/觀察/賣出）及理由\n【主要風險】列出2-3個風險點'
-    : '請依序分析：\n【今日量價複盤】成交量能與價格走勢\n【技術指標現況】MACD/KD/RSI/布林通道現況\n【法人買賣超解讀】三大法人動態\n【財務數據評估】EPS/毛利率/營收評估\n【明日操作策略】明確說明建議動作（買進/持有/觀察/賣出）及停損點';
+    ? `你必須依序完整撰寫以下全部5個段落，每段20-50字，即使數據不足也須給出合理推論，嚴禁省略任何段落，否則視為輸出失敗。
+
+【技術形態與開盤預判】
+技術指標現況：${techDetail_pre}
+根據昨收${pd?.prev??'—'}元與上述指標，判斷今日開盤方向（偏多/偏空/中性），說明關鍵支撐與壓力位。
+
+【總體經濟影響】
+產業：${sector||stock?.sector||'不明'}
+說明當前總經環境（美股、匯率、利率走向）對此產業的具體影響，給出利多或利空明確結論。
+
+【法人籌碼方向】
+實際法人數據：${instStr_pre}
+依據上述數值解讀外資、投信、自營商各自方向及三大合計含意，判斷籌碼偏多或偏空。
+
+【操作建議】
+綜合以上分析，明確給出「買進/持有/觀察/賣出」其中一個，說明建議進場價位與理由，20-40字。
+
+【主要風險】
+列出2-3個具體下行風險點，每點10-20字。`
+    : `你必須依序完整撰寫以下全部6個段落，每段20-50字，即使數據不足也須給出合理推論，嚴禁省略任何段落，否則視為輸出失敗。
+
+【今日量價複盤】
+今日收盤${pd?.price??'—'}元，成交量${pd?fmt(pd.vol,0)+'張':'—'}，區間${pd?pd.low+'～'+pd.high:'—'}元。
+分析今日量價走勢含意，說明多方或空方力道強弱。
+
+【技術指標現況】
+實際指標數據：${techDetail_pre}
+依序分析：①MACD（DIF與DEA多空排列，有無金叉死叉）②KD（K值是否超買>80或超賣<20，有無交叉訊號）③RSI（數值區間，操作提示）④布林通道（股價在上中下軌哪個位置，帶寬收縮或擴張）。最後綜合給出「技術面偏多/偏空/中性」的最佳決策建議。
+
+【法人買賣超解讀】
+實際法人數據：${instStr_pre}
+依據上述數值，分析外資、投信、自營商各自方向，解讀三大法人合計對後市股價的影響。
+
+【財務數據評估】
+EPS去年${fin2.eps_ly??'—'}元 / 今年累積${fin2.eps_ytd??'—'}元，毛利率${fin2.gm??'—'}%，營收YOY ${fin2.rev_yoy??'—'}%。
+評估基本面強弱，給出財務面結論。
+
+【明日操作策略】
+明確給出「買進/持有/觀察/賣出」其中一個，含建議進場價位與停損點，20-40字。
+
+【評分說明】
+本次綜合評分${sc.score}/100，說明主要加分或扣分原因，20-30字。`;
 
   const instRaw3  = getInstData(code);
   const instStr   = instRaw3 ? `三大法人合計${instRaw3.net>=0?'+':''}${instRaw3.net}張（外資${instRaw3.f>=0?'+':''}${instRaw3.f}，投信${instRaw3.i>=0?'+':''}${instRaw3.i}，自營${instRaw3.d>=0?'+':''}${instRaw3.d}）` : '尚未取得';
 
-  const prompt = `你是專業台股分析師，請用繁體中文針對以下個股撰寫完整的${modeStr}分析報告，每個段落至少2-3句話，總字數300-500字。
+  const prompt = `你是專業台股分析師。核心規則：每個指定段落都必須寫出完整內容，數據不足時給出合理推論，嚴禁省略任何段落，否則視為輸出失敗。請用繁體中文撰寫以下個股的${modeStr}分析報告，總字數300-500字。
 
 【個股資訊】
 代號：${code.replace('.TWO','').replace('.TW','')} ${name}　產業：${sector||stock?.sector||'不明'}
@@ -2335,6 +2431,7 @@ ${modeInstr}
   try {
     const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
     addLog('info', 'Gemini AI 分析中…');
+    addGeminiCall(1);  // 計費：AI 智能分析
     const r = await fetch(GEMINI_URL, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -2643,7 +2740,83 @@ setInterval(() => {
     new Date().toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
 }, 1000);
 
+// ── 問題3：財務上次更新日期標籤 ─────────────────────────
+function updateFinsDateLabel() {
+  const el = document.getElementById('fins-date-label');
+  if (!el) return;
+  try {
+    const d = localStorage.getItem('fins_cache_date');
+    if (!d) { el.textContent = ''; return; }
+    const dt = new Date(d);
+    const mm = String(dt.getMonth()+1).padStart(2,'0');
+    const dd = String(dt.getDate()).padStart(2,'0');
+    const hh = String(dt.getHours()).padStart(2,'0');
+    const mi = String(dt.getMinutes()).padStart(2,'0');
+    el.textContent = `(${mm}/${dd} ${hh}:${mi})`;
+  } catch(e) { el.textContent = ''; }
+}
+
+// ── 問題2：設定匯出（跨裝置同步）───────────────────────
+function exportSettings() {
+  try {
+    const data = {
+      v: 2,
+      exported: new Date().toISOString(),
+      holdStocks: holdStocks,
+      watchStocks: watchStocks,
+      geminiKey: geminiKey,
+      finnhubKey: finnhubKey,
+      fins: JSON.parse(localStorage.getItem('fins_cache') || '{}'),
+      fins_date: localStorage.getItem('fins_cache_date') || ''
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const today = new Date().toLocaleDateString('zh-TW').replace(/\//g,'-');
+    a.download = `台股看板設定_${today}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    addLog('ok', '✅ 設定已匯出，可傳至其他裝置匯入');
+  } catch(e) { alert('匯出失敗：' + e.message); }
+}
+
+// ── 問題2：設定匯入（跨裝置同步）───────────────────────
+function importSettings(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data.v || !Array.isArray(data.holdStocks)) {
+        alert('❌ 格式不正確，請使用本看板「📤 匯出設定」產生的 JSON 檔'); return;
+      }
+      const msg = `確定匯入設定？\n庫存股：${data.holdStocks.length} 檔\n觀察股：${data.watchStocks.length} 檔\n\n⚠ 將覆蓋目前清單`;
+      if (!confirm(msg)) return;
+      holdStocks  = data.holdStocks  || [];
+      watchStocks = data.watchStocks || [];
+      if (data.geminiKey)  { geminiKey  = data.geminiKey;  localStorage.setItem('gemini_api_key', geminiKey); }
+      if (data.finnhubKey) { finnhubKey = data.finnhubKey; localStorage.setItem('finnhub_api_key', finnhubKey); }
+      if (data.fins)      localStorage.setItem('fins_cache', JSON.stringify(data.fins));
+      if (data.fins_date) localStorage.setItem('fins_cache_date', data.fins_date);
+      saveStocksToStorage();
+      updateKeyIndicator();
+      updateFinsDateLabel();
+      document.getElementById('tc-hold').textContent  = holdStocks.length;
+      document.getElementById('tc-watch').textContent = watchStocks.length;
+      buildFilters();
+      renderTable();
+      addLog('ok', `✅ 匯入完成！庫存 ${holdStocks.length} 檔，觀察 ${watchStocks.length} 檔`);
+      alert(`✅ 設定匯入成功！\n庫存股：${holdStocks.length} 檔\n觀察股：${watchStocks.length} 檔`);
+    } catch(err) { alert('❌ 匯入失敗：' + err.message); }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
 // ── INIT ──────────────────────────────────────────────────
+updateFinsDateLabel();
+addGeminiCall(0);  // 載入時初始化顯示今日計數
 buildFilters();
 renderTable();
 </script>
