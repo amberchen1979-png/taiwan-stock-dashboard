@@ -666,7 +666,7 @@ async function fetchFinsWithGemini() {
 資料：${searchTxt}
 格式：{"${s.code}":{"eps_ly":2025全年EPS數字,"eps_ytd":2026累積EPS數字,"gm":最新季毛利率數字,"rev_yoy":最新月營收年增率數字}}
 key必須是"${s.code}"，無法確認填null，只回JSON。`}]}],
-          generationConfig:{maxOutputTokens:400,temperature:0}
+          generationConfig:{maxOutputTokens:800,temperature:0}
         })
       });
       const d2 = await r2.json();
@@ -1197,8 +1197,8 @@ async function fetchOne(code) {
 
   if (isTW) {
     let result = null;
-    if (isOpen) {
-      // 台股盤中：TWSE MIS 即時
+   if (isOpen || true) {
+      // 台股盤中及盤後：TWSE MIS（z欄位=今收，y欄位=昨收）
       result = await fetchTWSEMIS(code);
       if (result) addLog('ok',`✓ ${code} [TWSE即時] ${result.price}`);
     }
