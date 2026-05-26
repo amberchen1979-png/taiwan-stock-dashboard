@@ -945,14 +945,27 @@ function getTodayDateStr() {
 
 async function fetchTWSEInst(dateStr) {
   const url = 'https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date='+dateStr+'&selectType=ALLBUT0999';
-  const proxy = 'https://corsproxy.io/?'+encodeURIComponent(url);
+  const proxies = [
+    'https://corsproxy.io/?'+encodeURIComponent(url),
+    'https://api.allorigins.win/raw?url='+encodeURIComponent(url),
+    'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(url),
+  ];
+  let j = null;
+  for (const proxy of proxies) {
+    try {
+      const r = await fetch(proxy, {signal: AbortSignal.timeout(12000)});
+      if (!r.ok) { addLog('warn','TWSE T86 proxy失敗:'+r.status); continue; }
+      j = await r.json();
+      if (j?.stat === 'OK' && j?.data) break;
+      j = null;
+    } catch(e) { addLog('warn','TWSE T86:'+e.message); }
+  }
   try {
-    const r = await fetch(proxy, {signal: AbortSignal.timeout(12000)});
-    if (!r.ok) throw new Error('HTTP '+r.status);
-    const j = await r.json();
-    if (j.stat !== 'OK' || !j.data) return {};
+    if (!j) throw new Error('所有proxy失敗');
+    const j2 = j;
+    if (j2.stat !== 'OK' || !j2.data) return {};
     const result = {};
-    j.data.forEach(row => {
+    j2.data.forEach(row => {
       const no  = (row[0]||'').trim();
       const toZ = s => Math.round(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
       const f   = toZ(row[4]);   // 外陸資買賣超股數÷1000=張 [4]
@@ -967,24 +980,49 @@ async function fetchTWSEInst(dateStr) {
 }
 
 async function fetchTPExInst(dateStr) {
+  // TPEx OpenAPI（有CORS，不需proxy）：回傳上櫃個股三大法人
   const tpDate = dateStr.slice(0,4)+'/'+dateStr.slice(4,6)+'/'+dateStr.slice(6,8);
-  const url = 'https://www.tpex.org.tw/www/zh-tw/fund/ins_trading?date='+tpDate+'&response=json';
-  const proxy = 'https://corsproxy.io/?'+encodeURIComponent(url);
-  try {
-    const r = await fetch(proxy, {signal: AbortSignal.timeout(12000)});
-    if (!r.ok) throw new Error('HTTP '+r.status);
-    const j = await r.json();
-    const rows = j.tables?.[0]?.data || j.aaData || [];
-    const result = {};
-    rows.forEach(row => {
-      const no = (row[0]||'').trim();
-      const clean = s => parseInt((s||'0').replace(/,/g,'').replace(/[+]/g,''))||0;
-      const f=clean(row[4]), i=clean(row[7]), d2=clean(row[10]), net=clean(row[11]);
-      if (no) result[no] = {f, i, d:d2, net, src:'tpex'};
-    });
-    addLog('ok', 'TPEx三大法人：'+Object.keys(result).length+' 筆');
-    return result;
-  } catch(e) { addLog('warn','TPEx三大法人失敗：'+e.message); return {}; }
+  // 嘗試多個 TPEx endpoint
+  const urls = [
+    'https://www.tpex.org.tw/openapi/v1/tpex_fund_ins_tradedata',
+    'https://corsproxy.io/?'+encodeURIComponent('https://www.tpex.org.tw/www/zh-tw/fund/ins_trading?date='+tpDate+'&response=json'),
+    'https://api.allorigins.win/raw?url='+encodeURIComponent('https://www.tpex.org.tw/www/zh-tw/fund/ins_trading?date='+tpDate+'&response=json'),
+  ];
+  for (const url of urls) {
+    try {
+      const r = await fetch(url, {signal: AbortSignal.timeout(12000)});
+      if (!r.ok) continue;
+      const j = await r.json();
+      const result = {};
+      // OpenAPI 格式
+      if (Array.isArray(j) && j[0]?.SecuritiesCompanyCode) {
+        j.forEach(item => {
+          const no = (item.SecuritiesCompanyCode||'').trim();
+          const clean = s => Math.round(parseFloat((s||'0').replace(/,/g,''))||0);
+          const f   = clean(item.ForeignInvestmentNetBuy);
+          const i   = clean(item.InvestmentTrustNetBuy);
+          const d2  = clean(item.DealerNetBuy);
+          const net = clean(item.TotalNetBuy||item.Total3InstitutionsNetBuy);
+          if (no) result[no] = {f, i, d:d2, net, src:'tpex'};
+        });
+      } else {
+        // 舊版格式
+        const rows = j.tables?.[0]?.data || j.aaData || [];
+        rows.forEach(row => {
+          const no = (row[0]||'').trim();
+          const clean = s => parseInt((s||'0').replace(/,/g,'').replace(/[+]/g,''))||0;
+          const f=clean(row[4]), i2=clean(row[7]), d2=clean(row[10]), net=clean(row[11]);
+          if (no) result[no] = {f, i:i2, d:d2, net, src:'tpex'};
+        });
+      }
+      if (Object.keys(result).length > 0) {
+        addLog('ok','TPEx三大法人：'+Object.keys(result).length+' 筆');
+        return result;
+      }
+    } catch(e) { addLog('warn','TPEx:'+e.message); }
+  }
+  addLog('warn','TPEx三大法人所有來源失敗');
+  return {};
 }
 
 async function fetchInstitutional() {
@@ -1219,20 +1257,23 @@ async function fetchOne(code) {
 
   if (isTW) {
     let result = null;
-   if (isOpen || true) {
-      // 台股盤中及盤後：TWSE MIS（z欄位=今收，y欄位=昨收）
+    if (isOpen) {
+      // ★ 盤中：MIS即時（proxy）→ Yahoo即時（最可靠備援）
       result = await fetchTWSEMIS(code);
-      if (result) addLog('ok',`✓ ${code} [TWSE即時] ${result.price}`);
-    }
-    if (!result) {
-      // 台股盤後或MIS失敗：TWSE OpenAPI 收盤
+      if (result) addLog('ok',`✓ ${code} [MIS即時] ${result.price}`);
+      if (!result) {
+        // MIS失敗 → Yahoo Finance即時（regularMarketPrice，盤中會更新）
+        result = await fetchYahoo(code);
+        if (result) addLog('ok',`✓ ${code} [Yahoo即時] ${result.price}`);
+      }
+    } else {
+      // ★ 盤後/盤前：TWSE收盤資料
       result = await fetchTWSEClose(code);
       if (result) addLog('ok',`✓ ${code} [TWSE收盤] ${result.price}`);
-    }
-    if (!result) {
-      // 台股備援：Yahoo Finance
-      result = await fetchYahoo(code);
-      if (result) addLog('ok',`✓ ${code} [Yahoo] ${result.price}`);
+      if (!result) {
+        result = await fetchYahoo(code);
+        if (result) addLog('ok',`✓ ${code} [Yahoo] ${result.price}`);
+      }
     }
     if (result) {
       // 盤後模式（TWSE Close）：
@@ -1279,8 +1320,9 @@ async function fetchAllPrices() {
   setDot('dot-finnhub','off'); setDot('dot-proxy','off');
   clearLog();
   addLog('info', `開始抓取股價（${finnhubKey?'Finnhub主/Yahoo備':'Yahoo Finance備援'}），共 ${holdStocks.length + watchStocks.length} 檔…`);
-  // 同步抓三大法人（不等待，背景執行）
-  fetchInstitutional().then(() => { renderTable(); }).catch(()=>{});
+  // ★ 先等三大法人抓完，確保 instCache 有資料再渲染
+  addLog('info','正在抓取三大法人…');
+  try { await fetchInstitutional(); addLog('ok','三大法人就緒'); } catch(e) { addLog('warn','三大法人抓取失敗: '+e.message); }
   document.getElementById('data-src-label').textContent = finnhubKey ? 'Finnhub + Yahoo備援' : 'Yahoo Finance';
 
   const all = [...holdStocks, ...watchStocks];
@@ -2806,6 +2848,15 @@ function importSettings(event) {
 }
 
 // ── INIT ──────────────────────────────────────────────────
+// ★ 版本號快取清除：若快取版本不符，自動清空inst_cache避免舊錯誤數字
+(function clearOldCache() {
+  const CACHE_VER = '28_3';
+  if (localStorage.getItem('cache_ver') !== CACHE_VER) {
+    localStorage.removeItem('inst_cache');
+    localStorage.setItem('cache_ver', CACHE_VER);
+    console.log('[INIT] 快取版本更新，已清除舊三大法人快取');
+  }
+})();
 updateFinsDateLabel();
 addGeminiCall(0);  // 載入時初始化顯示今日計數
 buildFilters();
