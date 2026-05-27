@@ -2860,13 +2860,21 @@ async function refetchOneFin(code) {
       body:JSON.stringify({
         contents:[{parts:[{text:prompt}]}],
         tools:[{google_search:{}}],
-        generationConfig:{maxOutputTokens:200,temperature:0}
+        generationConfig:{maxOutputTokens:500,temperature:0}
       })
     });
     addGeminiCall(1);
     const j = await r.json();
     const text = (j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();
-    const clean = text.replace(/```json/g,'').replace(/```/g,'').trim();
+    // 移除 markdown，並嘗試擷取第一個完整 JSON 物件
+    let clean = text.replace(/```json/g,'').replace(/```/g,'').trim();
+    // 若 JSON 被截斷，嘗試只取到最後一個完整的 }
+    const lastBrace = clean.lastIndexOf('}');
+    if (lastBrace !== -1) clean = clean.slice(0, lastBrace+1);
+    // 補上可能缺失的結尾括號
+    const openCount = (clean.match(/\{/g)||[]).length;
+    const closeCount = (clean.match(/\}/g)||[]).length;
+    for (let i=0; i<openCount-closeCount; i++) clean += '}';
     const parsed = JSON.parse(clean);
     if (parsed[code]) {
       FINS[code] = Object.assign({}, FINS[code]||{}, parsed[code]);
