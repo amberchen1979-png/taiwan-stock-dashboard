@@ -1279,6 +1279,10 @@ async function fetchOne(code) {
 
   if (isTW) {
     let result = null;
+    // fetchOne 內部計算 isAfterClose（13:30後視為收盤）
+    const twNow = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
+    const isAfterCloseNow = (twNow.getHours() + twNow.getMinutes()/60) >= 13.5;
+
     if (isOpen) {
       // ★ 盤中（9:00-13:30）：MIS即時 → Yahoo即時備援
       result = await fetchTWSEMIS(code);
@@ -1287,7 +1291,7 @@ async function fetchOne(code) {
         result = await fetchYahoo(code);
         if (result) addLog('ok',`✓ ${code} [Yahoo即時] ${result.price}`);
       }
-    } else if (isAfterClose) {
+    } else if (isAfterCloseNow) {
       // ★ 收盤後（13:30後）：TWSE STOCK_DAY 取今日收盤價
       result = await fetchTWSEClose(code);
       if (result) addLog('ok',`✓ ${code} [TWSE今收] ${result.price}`);
