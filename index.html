@@ -1600,23 +1600,34 @@ function ema(data, period) {
   return result;
 }
 
-// 計算 MACD (12,26,9)
+// 計算 MACD (10,20,7)
 function calcMACD(closes) {
-  if (closes.length < 26) return null;
-  const ema12 = ema(closes, 12);
-  const ema26 = ema(closes, 26);
-  const dif   = ema12.map((v,i) => +(v - ema26[i]).toFixed(2));
-  const dem   = ema(dif.slice(25), 9);  // DEA從第26天開始
-  const macd  = dem.map((v,i) => +((dif[i+25] - v)*2).toFixed(2));
+  if (closes.length < 20) return null;
+  const ema10 = ema(closes, 10);
+  const ema20 = ema(closes, 20);
+  const dif   = ema10.map((v,i) => +(v - ema20[i]).toFixed(3));
+  const dem   = ema(dif.slice(19), 7);  // DEA從第20天開始
+  const bars  = dem.map((v,i) => +((dif[i+19] - v)*2).toFixed(3));
   const last  = closes.length-1;
   const difLast = dif[last];
   const deaLast = dem[dem.length-1];
+  const barLast = bars[bars.length-1];
+  const barPrev = bars.length>=2 ? bars[bars.length-2] : 0;
+  // 金叉死叉：柱狀由負轉正=金叉，由正轉負=死叉
+  const cross = bars.length>=2
+    ? (barLast>0 && barPrev<=0 ? '黃金交叉 🟢' : barLast<0 && barPrev>=0 ? '死亡交叉 🔴' : '')
+    : '';
+  // 結論
+  const conclusion = difLast>deaLast && barLast>0 ? '多頭強勢，可偏多操作'
+    : difLast>deaLast && barLast<=0 ? '多頭排列但動能減弱，留意轉折'
+    : difLast<=deaLast && barLast<0 ? '空頭主導，建議觀望'
+    : '空頭排列但動能收斂，等待訊號';
   return {
     dif: +difLast.toFixed(3),
     dea: +deaLast.toFixed(3),
-    bar: +((difLast-deaLast)*2).toFixed(3),
+    bar: +barLast.toFixed(3),
     trend: difLast > deaLast ? 'up' : 'dn',
-    cross: macd.length>=2 ? (macd[macd.length-1]>0 && macd[macd.length-2]<=0 ? '黃金交叉' : macd[macd.length-1]<0 && macd[macd.length-2]>=0 ? '死亡交叉' : '') : '',
+    cross, conclusion,
   };
 }
 
@@ -1786,27 +1797,31 @@ async function showTechDetail(code, name) {
       <span style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;color:${valueColor}">${value}${note?`<span style="font-size:10px;color:#8aa8c8;margin-left:5px">${note}</span>`:''}</span>
     </div>`;
 
+  // 金叉死叉警示 badge
+  const crossBadge = (cross) => cross ? `<span style="display:inline-block;padding:2px 10px;border-radius:4px;font-size:12px;font-weight:700;background:${cross.includes('黃金')?'rgba(0,230,118,.15)':'rgba(255,79,79,.15)'};color:${cross.includes('黃金')?'#00e676':'#ff4f4f'};border:1px solid ${cross.includes('黃金')?'rgba(0,230,118,.3)':'rgba(255,79,79,.3)'}">⚡ ${cross}</span>` : '';
+
   body.innerHTML = `
     <!-- 近20日走勢 -->
-    <div style="background:#111827;border:1px solid #1a2840;border-radius:10px;padding:14px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:16px">
+    <div style="background:#111827;border:1px solid #1a2840;border-radius:10px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:16px">
       <div>
-        <div style="font-size:11px;color:#8aa8c8;margin-bottom:4px">近20日收盤走勢　最新：${closes[closes.length-1]} 元</div>
-        <div style="font-size:10px;color:#8aa8c8">${dates[0]} ～ ${dates[dates.length-1]}</div>
+        <div style="font-size:12px;color:#8aa8c8;margin-bottom:4px">近20日收盤走勢　最新：${closes[closes.length-1]} 元</div>
+        <div style="font-size:11px;color:#8aa8c8">${dates[0]} ～ ${dates[dates.length-1]}</div>
       </div>
       ${miniChart}
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:0">
+    <!-- 左右兩欄：上方 MACD+KD，下方 RSI+布林 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
 
     <!-- MACD -->
-    ${macd ? card('📊 MACD（12,26,9）', '#00c9e8', `
+    ${macd ? card('📊 MACD（10,20,7）', '#00c9e8', `
       ${row('DIF（快線）', macd.dif, c(macd.dif))}
       ${row('DEA（慢線）', macd.dea, c(macd.dea))}
       ${row('MACD柱狀', macd.bar, c(macd.bar))}
       ${row('趨勢', macd.dif>macd.dea?'多頭排列':'空頭排列', macd.dif>macd.dea?'#00e676':'#ff4f4f')}
-      ${macd.cross?row('交叉訊號', macd.cross, macd.cross.includes('黃金')?'#00e676':'#ff4f4f'):''}
-      <div style="margin-top:8px;font-size:11px;color:#c0d4e8;line-height:1.6">
-        DIF>DEA且柱狀為正→多方強勢<br>DIF<DEA且柱狀為負→空方主導
+      <div style="margin:8px 0 4px">${crossBadge(macd.cross)||'<span style="font-size:11px;color:#8aa8c8">無交叉訊號</span>'}</div>
+      <div style="margin-top:6px;padding:6px 8px;background:rgba(0,201,232,.06);border-radius:6px;font-size:12px;color:#dde6f0;line-height:1.5">
+        💡 ${macd.conclusion||'觀察中'}
       </div>
     `) : card('📊 MACD', '#00c9e8', '<div style="color:#8aa8c8;font-size:12px">資料不足</div>')}
 
@@ -1815,10 +1830,10 @@ async function showTechDetail(code, name) {
       ${row('K 值', kd.k, kd.k>=80?'#ff4f4f':kd.k<=20?'#00e676':'#dde6f0')}
       ${row('D 值', kd.d, kd.d>=80?'#ff4f4f':kd.d<=20?'#00e676':'#dde6f0')}
       ${row('位置', kd.zone, zc(kd.zone))}
-      ${row('趨勢方向', kd.k>kd.d?'K值在上（偏多）':'K值在下（偏空）', kd.k>kd.d?'#00e676':'#ff4f4f')}
-      ${kd.cross?row('交叉', kd.cross, kd.cross.includes('黃金')?'#00e676':'#ff4f4f'):''}
-      <div style="margin-top:8px;font-size:11px;color:#c0d4e8;line-height:1.6">
-        K>80超買留意回調；K<20超賣留意反彈<br>K向上穿越D→黃金交叉買訊
+      ${row('趨勢', kd.k>kd.d?'K值在上（偏多）':'K值在下（偏空）', kd.k>kd.d?'#00e676':'#ff4f4f')}
+      <div style="margin:8px 0 4px">${crossBadge(kd.cross)||'<span style="font-size:11px;color:#8aa8c8">無交叉訊號</span>'}</div>
+      <div style="margin-top:6px;padding:6px 8px;background:rgba(255,171,0,.06);border-radius:6px;font-size:12px;color:#dde6f0;line-height:1.5">
+        💡 ${kd.k>=80?'超買區，留意回調壓力':kd.k<=20?'超賣區，留意反彈機會':kd.cross?.includes('黃金')?'黃金交叉，短線偏多':kd.cross?.includes('死亡')?'死亡交叉，短線偏空':kd.k>kd.d?'K>D多方排列，趨勢向上':'K<D空方排列，趨勢向下'}
       </div>
     `) : card('📈 KD', '#ffab00', '<div style="color:#8aa8c8;font-size:12px">資料不足</div>')}
 
@@ -1828,31 +1843,29 @@ async function showTechDetail(code, name) {
       ${row('強弱區間', rsi.zone, zc(rsi.zone))}
       ${row('操作提示', rsi.signal, rsi.signal==='注意回調'?'#ff4f4f':rsi.signal==='留意反彈'?'#00e676':'#c0d4e8')}
       <div style="margin-top:8px;padding:6px 8px;background:rgba(255,107,157,.06);border-radius:6px">
-        <div style="font-size:11px;color:#c0d4e8;line-height:1.6">
-          RSI>70 超買（${rsi.value>=70?'⚠ 目前在此區間':'未達'} ）<br>
-          RSI<30 超賣（${rsi.value<=30?'⚠ 目前在此區間':'未達'}）<br>
-          RSI=50 多空分界線
+        <div style="font-size:12px;color:#c0d4e8;line-height:1.7">
+          ${rsi.value>=70?'⚠ 超買區，注意獲利了結時機':rsi.value<=30?'⚠ 超賣區，可留意低接機會':rsi.value>=50?'強勢格局，多方佔優':'弱勢格局，空方佔優'}
         </div>
+        <div style="font-size:11px;color:#8aa8c8;margin-top:4px">RSI>70超買 | RSI<30超賣 | RSI=50多空分界</div>
       </div>
     `) : card('🔴 RSI', '#ff6b9d', '<div style="color:#8aa8c8;font-size:12px">資料不足</div>')}
 
     <!-- 布林通道 -->
     ${bb ? card('📉 布林通道（20日, 2σ）', '#a78bfa', `
-      ${row('上軌 Upper', bb.upper, '#ff8a80')}
-      ${row('中軌 Middle', bb.mid,   '#c0d4e8')}
-      ${row('下軌 Lower', bb.lower, '#69f0ae')}
+      ${row('上軌', bb.upper, '#ff8a80')}
+      ${row('中軌', bb.mid,   '#c0d4e8')}
+      ${row('下軌', bb.lower, '#69f0ae')}
       ${row('%B 位置', bb.pb+'%', bb.pb>=90?'#ff4f4f':bb.pb<=10?'#00e676':'#dde6f0', '(0%=下軌,100%=上軌)')}
-      ${row('帶寬', bb.bw+'%', '#dde6f0')}
       ${row('位置判斷', bb.pos, bb.pos.includes('上軌')?'#ff4f4f':bb.pos.includes('下軌')?'#00e676':'#c0d4e8')}
       ${row('帶寬狀態', bb.squeeze, bb.squeeze.includes('收縮')?'#ffab00':'#c0d4e8')}
-      <div style="margin-top:8px;font-size:11px;color:#c0d4e8;line-height:1.6">
-        帶寬收縮後常有大波動；%B>100突破上軌為強勢
+      <div style="margin-top:8px;padding:6px 8px;background:rgba(167,139,250,.06);border-radius:6px;font-size:12px;color:#dde6f0;line-height:1.5">
+        💡 ${bb.pb>=80?'接近上軌，短線漲幅有限，留意壓力':bb.pb<=20?'接近下軌，若量能配合可能反彈':bb.squeeze.includes('收縮')?'帶寬收縮，即將出現方向選擇':'帶寬正常，趨勢持續中'}
       </div>
     `) : card('📉 布林通道', '#a78bfa', '<div style="color:#8aa8c8;font-size:12px">資料不足</div>')}
 
     </div>
 
-    <div style="margin-top:12px;padding:10px 14px;background:rgba(0,0,0,.3);border-radius:8px;font-size:10px;color:#8aa8c8;line-height:1.7">
+    <div style="margin-top:12px;padding:10px 14px;background:rgba(0,0,0,.3);border-radius:8px;font-size:11px;color:#8aa8c8;line-height:1.7">
       ⚠ 資料來源：TWSE/TPEx 歷史日線（近3個月）。技術指標為數學計算，僅供參考，不構成投資建議。
     </div>`;
 }
@@ -2152,6 +2165,9 @@ function showDetail(code) {
             <div class="dm-l">${m.l}</div>
             <div class="dm-v ${m.c}">${m.v}</div>
           </div>`).join('')}
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin:-6px 0 10px">
+        <button onclick="refetchOneFin('${code}')" style="font-size:12px;padding:3px 12px;background:rgba(255,171,0,.1);border:1px solid rgba(255,171,0,.35);color:#ffab00;border-radius:6px;cursor:pointer" title="只重新抓取此個股的 EPS/毛利率/營收，不影響其他個股">↻ 重抓此股財務</button>
       </div>
       <div style="margin-bottom:12px">
         <div style="font-size:11px;color:var(--text2);font-weight:500;margin-bottom:6px">技術訊號</div>
@@ -2824,6 +2840,52 @@ function deleteStock(idx) {
   buildFilters();
   renderTable();
   addLog('ok', `🗑 已刪除 ${delName}，清單已永久更新`);
+}
+
+// ── 個股單獨重抓財務 ─────────────────────────────────────
+async function refetchOneFin(code) {
+  if (!geminiKey) { alert('請先設定 Gemini API Key'); return; }
+  const stock = [...holdStocks,...watchStocks].find(s=>s.code===code);
+  if (!stock) return;
+  const no = code.replace('.TWO','').replace('.TW','');
+  const btn = event?.target;
+  if (btn) { btn.textContent='抓取中…'; btn.disabled=true; }
+  try {
+    const prompt = `台股${no} ${stock.name} 最新財務：2025全年EPS、2026累積EPS、最新季毛利率%、最新月營收年增率%
+只回傳JSON，格式：{"${code}":{"eps_ly":數字,"eps_ytd":數字,"gm":數字,"rev_yoy":數字}}`;
+    const r = await fetch(GEMINI_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        contents:[{parts:[{text:prompt}]}],
+        tools:[{google_search:{}}],
+        generationConfig:{maxOutputTokens:200,temperature:0}
+      })
+    });
+    addGeminiCall(1);
+    const j = await r.json();
+    const text = (j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();
+    const clean = text.replace(/```json
+?/g,'').replace(/```
+?/g,'').trim();
+    const parsed = JSON.parse(clean);
+    if (parsed[code]) {
+      FINS[code] = Object.assign({}, FINS[code]||{}, parsed[code]);
+      try {
+        const cache = JSON.parse(localStorage.getItem('fins_cache')||'{}');
+        cache[code] = FINS[code];
+        localStorage.setItem('fins_cache', JSON.stringify(cache));
+      } catch(e) {}
+      renderTable();
+      showDetail(code);  // 刷新詳情視窗
+      addLog('ok', `✅ ${stock.name} 財務更新完成`);
+    }
+  } catch(e) {
+    addLog('warn', `${stock.name} 財務重抓失敗：${e.message}`);
+    alert('財務重抓失敗：'+e.message);
+  } finally {
+    if (btn) { btn.textContent='↻ 重抓此股財務'; btn.disabled=false; }
+  }
 }
 
 // ── 時鐘 ──────────────────────────────────────────────────
