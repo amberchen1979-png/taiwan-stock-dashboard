@@ -817,8 +817,8 @@ async function fetchTWSEClose(code) {
   const dd    = String(tw.getDate()).padStart(2,'0');
   const yyyymm = tw.getFullYear()+mm;
 
-  // ★ 判斷是否已過收盤時間（14:30後視為今日結算完成）
-  const isAfterClose = (tw.getHours() + tw.getMinutes()/60) >= 14.5;
+  // ★ 判斷是否已過收盤時間（13:30後視為今日結算完成）
+  const isAfterClose = (tw.getHours() + tw.getMinutes()/60) >= 13.5;
 
   // 解析輔助函數
   const parseClose = row => {
@@ -1004,9 +1004,9 @@ async function fetchTPExInst(dateStr) {
   // allorigins 對此 endpoint 可通（se=EW 為上櫃一般股）
   const url = 'https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&d='+tpDate+'&se=EW&s=0,asc&o=json';
   const proxies = [
+    'https://corsproxy.io/?'+encodeURIComponent(url),
     'https://api.allorigins.win/raw?url='+encodeURIComponent(url),
     'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(url),
-    'https://corsproxy.io/?'+encodeURIComponent(url),
   ];
   for (const proxy of proxies) {
     const r = await fetchWithRetry(proxy, {}, 2, 2000);
@@ -1280,18 +1280,25 @@ async function fetchOne(code) {
   if (isTW) {
     let result = null;
     if (isOpen) {
-      // ★ 盤中：MIS即時（proxy）→ Yahoo即時（最可靠備援）
+      // ★ 盤中（9:00-13:30）：MIS即時 → Yahoo即時備援
       result = await fetchTWSEMIS(code);
       if (result) addLog('ok',`✓ ${code} [MIS即時] ${result.price}`);
       if (!result) {
-        // MIS失敗 → Yahoo Finance即時（regularMarketPrice，盤中會更新）
         result = await fetchYahoo(code);
         if (result) addLog('ok',`✓ ${code} [Yahoo即時] ${result.price}`);
       }
-    } else {
-      // ★ 盤後/盤前：TWSE收盤資料
+    } else if (isAfterClose) {
+      // ★ 收盤後（13:30後）：TWSE STOCK_DAY 取今日收盤價
       result = await fetchTWSEClose(code);
-      if (result) addLog('ok',`✓ ${code} [TWSE收盤] ${result.price}`);
+      if (result) addLog('ok',`✓ ${code} [TWSE今收] ${result.price}`);
+      if (!result) {
+        result = await fetchYahoo(code);
+        if (result) addLog('ok',`✓ ${code} [Yahoo收盤] ${result.price}`);
+      }
+    } else {
+      // ★ 盤前（9:00前）：TWSE STOCK_DAY 取昨收盤價
+      result = await fetchTWSEClose(code);
+      if (result) addLog('ok',`✓ ${code} [TWSE昨收] ${result.price}`);
       if (!result) {
         result = await fetchYahoo(code);
         if (result) addLog('ok',`✓ ${code} [Yahoo] ${result.price}`);
@@ -1387,6 +1394,19 @@ async function fetchAllPrices() {
   renderTable();
   // 背景計算技術指標（不阻塞主流程）
   computeAllTechSignals().catch(()=>{});
+  // 補抓沒有 SPARK 資料的個股歷史走勢（新增個股首次抓取）
+  const noSpark = all.filter(s => !SPARK[s.code] || SPARK[s.code].length < 3);
+  if (noSpark.length > 0) {
+    addLog('info', `補抓 ${noSpark.length} 檔歷史走勢…`);
+    (async () => {
+      for (const s of noSpark) {
+        await fetchTWSEClose(s.code);
+        await new Promise(r=>setTimeout(r,600));
+      }
+      renderTable();
+      addLog('ok','歷史走勢補抓完成');
+    })();
+  }
 }
 
 // ── LOG ──────────────────────────────────────────────────
@@ -1466,7 +1486,19 @@ function calcScore(stock, pd) {
 }
 
 function sparkHTML(code) {
-  const d  = SPARK[code] || [50,50,50,50,50];
+  // 新增個股若無 SPARK 資料，背景觸發抓取
+  if (!SPARK[code] || SPARK[code].length === 0) {
+    const s = [...holdStocks,...watchStocks].find(x=>x.code===code);
+    if (s) {
+      const no = code.replace('.TWO','').replace('.TW','');
+      const isOTC = code.endsWith('.TWO');
+      const tw = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
+      const yyyymm = tw.getFullYear()+String(tw.getMonth()+1).padStart(2,'0');
+      fetchTWSEClose(code).then(r=>{ if(r) renderTable(); });
+    }
+  }
+  const d  = SPARK[code] || [];
+  if (d.length === 0) return '<div style="width:80px;height:30px;display:flex;align-items:center;justify-content:center;color:#3d5570;font-size:10px">抓取中</div>';
   const mn = Math.min(...d), mx = Math.max(...d), r = mx - mn || 1;
   const isUp = d[d.length-1] >= d[0];
   const color = isUp ? 'var(--up)' : 'var(--dn)';
@@ -1787,14 +1819,14 @@ async function showTechDetail(code, name) {
 
   const card = (title, color, content) => `
     <div style="background:#111827;border:1px solid #1a2840;border-radius:10px;padding:14px 16px;border-top:3px solid ${color}">
-      <div style="font-size:12px;font-weight:600;color:${color};margin-bottom:10px;letter-spacing:.05em">${title}</div>
+      <div style="font-size:14px;font-weight:700;color:${color};margin-bottom:10px;letter-spacing:.05em">${title}</div>
       ${content}
     </div>`;
 
   const row = (label, value, valueColor='#dde6f0', note='') => `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(26,40,64,.5)">
-      <span style="font-size:12px;color:#c0d4e8">${label}</span>
-      <span style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;color:${valueColor}">${value}${note?`<span style="font-size:10px;color:#8aa8c8;margin-left:5px">${note}</span>`:''}</span>
+      <span style="font-size:13px;color:#dde6f0;font-weight:500">${label}</span>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:${valueColor}">${value}${note?`<span style="font-size:11px;color:#a0bcd8;margin-left:5px">${note}</span>`:''}</span>
     </div>`;
 
   // 金叉死叉警示 badge
@@ -1804,8 +1836,8 @@ async function showTechDetail(code, name) {
     <!-- 近20日走勢 -->
     <div style="background:#111827;border:1px solid #1a2840;border-radius:10px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:16px">
       <div>
-        <div style="font-size:12px;color:#8aa8c8;margin-bottom:4px">近20日收盤走勢　最新：${closes[closes.length-1]} 元</div>
-        <div style="font-size:11px;color:#8aa8c8">${dates[0]} ～ ${dates[dates.length-1]}</div>
+        <div style="font-size:14px;color:#dde6f0;margin-bottom:4px;font-weight:600">近20日收盤走勢　最新：<span style="color:#00e5ff">${closes[closes.length-1]} 元</span></div>
+        <div style="font-size:12px;color:#c0d4e8">${dates[0]} ～ ${dates[dates.length-1]}</div>
       </div>
       ${miniChart}
     </div>
@@ -1820,7 +1852,7 @@ async function showTechDetail(code, name) {
       ${row('MACD柱狀', macd.bar, c(macd.bar))}
       ${row('趨勢', macd.dif>macd.dea?'多頭排列':'空頭排列', macd.dif>macd.dea?'#00e676':'#ff4f4f')}
       <div style="margin:8px 0 4px">${crossBadge(macd.cross)||'<span style="font-size:11px;color:#8aa8c8">無交叉訊號</span>'}</div>
-      <div style="margin-top:6px;padding:6px 8px;background:rgba(0,201,232,.06);border-radius:6px;font-size:12px;color:#dde6f0;line-height:1.5">
+      <div style="margin-top:6px;padding:6px 8px;background:rgba(0,201,232,.08);border-radius:6px;font-size:13px;color:#f0f6ff;line-height:1.6;font-weight:500">
         💡 ${macd.conclusion||'觀察中'}
       </div>
     `) : card('📊 MACD', '#00c9e8', '<div style="color:#8aa8c8;font-size:12px">資料不足</div>')}
@@ -1832,7 +1864,7 @@ async function showTechDetail(code, name) {
       ${row('位置', kd.zone, zc(kd.zone))}
       ${row('趨勢', kd.k>kd.d?'K值在上（偏多）':'K值在下（偏空）', kd.k>kd.d?'#00e676':'#ff4f4f')}
       <div style="margin:8px 0 4px">${crossBadge(kd.cross)||'<span style="font-size:11px;color:#8aa8c8">無交叉訊號</span>'}</div>
-      <div style="margin-top:6px;padding:6px 8px;background:rgba(255,171,0,.06);border-radius:6px;font-size:12px;color:#dde6f0;line-height:1.5">
+      <div style="margin-top:6px;padding:6px 8px;background:rgba(255,171,0,.08);border-radius:6px;font-size:13px;color:#f0f6ff;line-height:1.6;font-weight:500">
         💡 ${kd.k>=80?'超買區，留意回調壓力':kd.k<=20?'超賣區，留意反彈機會':kd.cross?.includes('黃金')?'黃金交叉，短線偏多':kd.cross?.includes('死亡')?'死亡交叉，短線偏空':kd.k>kd.d?'K>D多方排列，趨勢向上':'K<D空方排列，趨勢向下'}
       </div>
     `) : card('📈 KD', '#ffab00', '<div style="color:#8aa8c8;font-size:12px">資料不足</div>')}
@@ -1843,10 +1875,10 @@ async function showTechDetail(code, name) {
       ${row('強弱區間', rsi.zone, zc(rsi.zone))}
       ${row('操作提示', rsi.signal, rsi.signal==='注意回調'?'#ff4f4f':rsi.signal==='留意反彈'?'#00e676':'#c0d4e8')}
       <div style="margin-top:8px;padding:6px 8px;background:rgba(255,107,157,.06);border-radius:6px">
-        <div style="font-size:12px;color:#c0d4e8;line-height:1.7">
+        <div style="font-size:13px;color:#f0f6ff;line-height:1.7;font-weight:500">
           ${rsi.value>=70?'⚠ 超買區，注意獲利了結時機':rsi.value<=30?'⚠ 超賣區，可留意低接機會':rsi.value>=50?'強勢格局，多方佔優':'弱勢格局，空方佔優'}
         </div>
-        <div style="font-size:11px;color:#8aa8c8;margin-top:4px">RSI>70超買 | RSI<30超賣 | RSI=50多空分界</div>
+        <div style="font-size:12px;color:#a0bcd8;margin-top:4px">RSI>70超買 | RSI<30超賣 | RSI=50多空分界</div>
       </div>
     `) : card('🔴 RSI', '#ff6b9d', '<div style="color:#8aa8c8;font-size:12px">資料不足</div>')}
 
@@ -1858,14 +1890,14 @@ async function showTechDetail(code, name) {
       ${row('%B 位置', bb.pb+'%', bb.pb>=90?'#ff4f4f':bb.pb<=10?'#00e676':'#dde6f0', '(0%=下軌,100%=上軌)')}
       ${row('位置判斷', bb.pos, bb.pos.includes('上軌')?'#ff4f4f':bb.pos.includes('下軌')?'#00e676':'#c0d4e8')}
       ${row('帶寬狀態', bb.squeeze, bb.squeeze.includes('收縮')?'#ffab00':'#c0d4e8')}
-      <div style="margin-top:8px;padding:6px 8px;background:rgba(167,139,250,.06);border-radius:6px;font-size:12px;color:#dde6f0;line-height:1.5">
+      <div style="margin-top:8px;padding:6px 8px;background:rgba(167,139,250,.08);border-radius:6px;font-size:13px;color:#f0f6ff;line-height:1.6;font-weight:500">
         💡 ${bb.pb>=80?'接近上軌，短線漲幅有限，留意壓力':bb.pb<=20?'接近下軌，若量能配合可能反彈':bb.squeeze.includes('收縮')?'帶寬收縮，即將出現方向選擇':'帶寬正常，趨勢持續中'}
       </div>
     `) : card('📉 布林通道', '#a78bfa', '<div style="color:#8aa8c8;font-size:12px">資料不足</div>')}
 
     </div>
 
-    <div style="margin-top:12px;padding:10px 14px;background:rgba(0,0,0,.3);border-radius:8px;font-size:11px;color:#8aa8c8;line-height:1.7">
+    <div style="margin-top:12px;padding:10px 14px;background:rgba(0,0,0,.3);border-radius:8px;font-size:12px;color:#a0bcd8;line-height:1.7">
       ⚠ 資料來源：TWSE/TPEx 歷史日線（近3個月）。技術指標為數學計算，僅供參考，不構成投資建議。
     </div>`;
 }
