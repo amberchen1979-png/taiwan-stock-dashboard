@@ -786,11 +786,12 @@ async function fetchTWSEMIS(code) {
       const j = await r.json();
       const d = j?.msgArray?.[0];
       if (!d) continue;
-      // 盤中用 z（成交價），盤後/盤前用 y（昨收）作為參考價
-      const price = parseFloat(d.z && d.z!=='-' ? d.z : d.y);
+      // z='-' 代表尚無成交（15分鐘延遲內或未成交），回傳 null 讓 fetchOne 改走 Yahoo
+      if (!d.z || d.z === '-') return null;
+      const price = parseFloat(d.z);
       const prev  = parseFloat(d.y);
-      const high  = parseFloat(d.h && d.h!=='-' ? d.h : d.y);
-      const low   = parseFloat(d.l && d.l!=='-' ? d.l : d.y);
+      const high  = parseFloat(d.h && d.h!=='-' ? d.h : d.z);
+      const low   = parseFloat(d.l && d.l!=='-' ? d.l : d.z);
       const vol   = Math.round(parseFloat(d.v||0));
       if (!price||price<=0) continue;
       const chg = prev>0 ? +(price-prev).toFixed(2) : null;
@@ -993,34 +994,40 @@ async function fetchTWSEInst(dateStr) {
 }
 
 async function fetchTPExInst(dateStr) {
-  const tpDate = dateStr.slice(0,4)+'/'+dateStr.slice(4,6)+'/'+dateStr.slice(6,8);
-  const url = 'https://www.tpex.org.tw/www/zh-tw/fund/ins_trading?date='+tpDate+'&response=json';
+  // 民國年轉換：yyyymmdd → yyy/mm/dd
+  const year = parseInt(dateStr.slice(0,4)) - 1911;
+  const tpDate = year+'/'+dateStr.slice(4,6)+'/'+dateStr.slice(6,8);
+  // allorigins 對此 endpoint 可通（se=EW 為上櫃一般股）
+  const url = 'https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&d='+tpDate+'&se=EW&s=0,asc&o=json';
   const proxies = [
-    'https://corsproxy.io/?'+encodeURIComponent(url),
     'https://api.allorigins.win/raw?url='+encodeURIComponent(url),
     'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(url),
+    'https://corsproxy.io/?'+encodeURIComponent(url),
   ];
   for (const proxy of proxies) {
     const r = await fetchWithRetry(proxy, {}, 2, 2000);
     if (!r) continue;
     try {
       const j = await r.json();
-      const rows = j.tables?.[0]?.data || j.aaData || [];
-      if (rows.length === 0) continue;
+      const rows = j.tables?.[0]?.data || [];
+      if (rows.length === 0) { addLog('warn','TPEx 當日資料尚未更新'); continue; }
       const result = {};
+      const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
       rows.forEach(row => {
         const no = (row[0]||'').trim();
-        const clean = s => parseInt((s||'0').replace(/,/g,'').replace(/[+]/g,''))||0;
-        const f=clean(row[4]), i2=clean(row[7]), d2=clean(row[10]), net=clean(row[11]);
+        const f   = toZ(row[4]);   // 外資買賣超股數÷1000=張 [4]
+        const i2  = toZ(row[7]);   // 投信買賣超股數÷1000=張 [7]
+        const d2  = toZ(row[13]);  // 自營商含避險÷1000=張 [13]
+        const net = toZ(row[23]);  // 三大法人合計÷1000=張 [23]
         if (no) result[no] = {f, i:i2, d:d2, net, src:'tpex'};
       });
       if (Object.keys(result).length > 0) {
-        addLog('ok','TPEx三大法人：'+Object.keys(result).length+' 筆');
+        addLog('ok','TPEx三大法人：'+Object.keys(result).length+' 筆（allorigins）');
         return result;
       }
     } catch(e) { addLog('warn','TPEx JSON解析失敗：'+e.message); }
   }
-  addLog('warn','TPEx三大法人所有proxy失敗');
+  addLog('warn','TPEx三大法人資料尚未更新或抓取失敗');
   return {};
 }
 
