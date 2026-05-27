@@ -17,7 +17,7 @@
   --mono:'JetBrains Mono',monospace;
   --sans:'Noto Sans TC',sans-serif;
 }
-body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;min-height:100vh}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:16px;min-height:100vh}
 
 /* ── HEADER ── */
 .hdr{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 18px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:200;gap:10px;flex-wrap:wrap}
@@ -31,7 +31,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14
 .mode-grp{display:flex;background:var(--bg3);border:1px solid var(--border);border-radius:7px;overflow:hidden}
 .mode-btn{padding:5px 13px;font-size:12px;cursor:pointer;border:none;background:transparent;color:var(--text);font-family:var(--sans);transition:all .2s}
 .mode-btn.active{background:var(--accent2);color:#fff;font-weight:500}
-.icon-btn{padding:5px 12px;font-size:12px;background:transparent;border:1px solid var(--border2);color:var(--text);border-radius:7px;cursor:pointer;font-family:var(--sans);transition:all .2s;display:flex;align-items:center;gap:5px}
+.icon-btn{padding:6px 13px;font-size:13px;background:transparent;border:1px solid var(--border2);color:var(--text);border-radius:7px;cursor:pointer;font-family:var(--sans);transition:all .2s;display:flex;align-items:center;gap:5px}
 .icon-btn:hover,.icon-btn.loading-btn{border-color:var(--accent);color:var(--accent)}
 @keyframes spin{to{transform:rotate(360deg)}}
 .spin{animation:spin .7s linear infinite;display:inline-block}
@@ -56,7 +56,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14
 
 /* ── TABS ── */
 .tabs-wrap{padding:12px 18px 0;border-bottom:1px solid var(--border);display:flex;gap:6px}
-.tab{padding:7px 18px;font-size:13px;border:1px solid var(--border);border-bottom:none;border-radius:7px 7px 0 0;cursor:pointer;background:var(--bg2);color:var(--text2);transition:all .2s;font-family:var(--sans)}
+.tab{padding:8px 19px;font-size:14px;border:1px solid var(--border);border-bottom:none;border-radius:7px 7px 0 0;cursor:pointer;background:var(--bg2);color:var(--text2);transition:all .2s;font-family:var(--sans)}
 .tab.active{background:var(--bg3);color:var(--accent);border-color:var(--border2)}
 .tc{font-size:10px;background:var(--border2);color:var(--text);padding:1px 6px;border-radius:10px;margin-left:4px}
 .tab.active .tc{background:rgba(0,201,232,.2);color:var(--accent)}
@@ -64,7 +64,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14
 /* ── FILTERS ── */
 .filters{padding:10px 18px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .filter-label{font-size:10px;color:var(--text3);letter-spacing:.08em;text-transform:uppercase}
-.filter-btn{font-size:11px;padding:4px 10px;border:1px solid var(--border2);border-radius:5px;background:transparent;color:var(--text);cursor:pointer;font-family:var(--sans);transition:all .15s}
+.filter-btn{font-size:13px;padding:5px 12px;border:1px solid var(--border2);border-radius:5px;background:transparent;color:var(--text);cursor:pointer;font-family:var(--sans);transition:all .15s}
 .filter-btn.active{background:rgba(0,201,232,.1);border-color:var(--accent);color:var(--accent)}
 .filter-btn:hover{border-color:var(--border3);color:var(--text)}
 
@@ -80,7 +80,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14
 .tbl-wrap{padding:0 0 14px 0;overflow:hidden;position:relative}
 /* 桌面版正常顯示 */
 table{width:100%;border-collapse:collapse;min-width:900px}
-th{font-size:12px;color:var(--text);letter-spacing:.04em;padding:9px 12px;text-align:right;border-bottom:1px solid var(--border);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--bg2);z-index:10}
+th{font-size:13px;color:var(--text);letter-spacing:.04em;padding:10px 13px;text-align:right;border-bottom:1px solid var(--border);font-weight:500;white-space:nowrap;position:sticky;top:0;background:var(--bg2);z-index:10}
 th:first-child,td:first-child{text-align:left}
 td{padding:10px 8px;border-bottom:1px solid rgba(26,40,64,.6);vertical-align:middle;white-space:nowrap}
 tr{transition:background .12s;cursor:pointer}
@@ -105,27 +105,27 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
   .tabs-wrap{position:sticky;top:57px;z-index:150;background:var(--bg)}
   .filters{position:sticky;top:100px;z-index:140;background:var(--bg)}
   /* 縮小手機字體 */
-  .scode{font-size:13px}
-  .scname{font-size:11px}
+  .scode{font-size:15px}
+  .scname{font-size:13px}
   .ibadge{display:none}
-  th{font-size:10px;padding:7px 6px}
+  th{font-size:12px;padding:8px 7px}
   td{padding:8px 6px}
-  .pv{font-size:13px}
-  .cv{font-size:10px}
+  .pv{font-size:15px}
+  .cv{font-size:12px}
 }
 
 .sname{display:flex;flex-direction:column;gap:3px}
-.scode{font-family:var(--mono);font-size:15px;font-weight:700}
+.scode{font-family:var(--mono);font-size:18px;font-weight:700}
 .sinfo{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.scname{font-size:13px;color:var(--text)}
-.tbadge{font-size:11px;padding:2px 7px;border-radius:4px;font-family:var(--mono)}
+.scname{font-size:15px;color:var(--text)}
+.tbadge{font-size:13px;padding:3px 8px;border-radius:4px;font-family:var(--mono)}
 .tbadge.etf{background:rgba(0,136,187,.15);color:#4fc3f7;border:1px solid rgba(0,136,187,.3)}
 .tbadge.stock{background:rgba(0,230,118,.07);color:#69f0ae;border:1px solid rgba(0,230,118,.18)}
 .tbadge.lev{background:rgba(255,171,0,.1);color:#ffd54f;border:1px solid rgba(255,171,0,.22)}
-.ibadge{font-size:11px;padding:2px 8px;border-radius:4px;background:var(--bg4);color:var(--text);border:1px solid var(--border2)}
+.ibadge{font-size:13px;padding:3px 9px;border-radius:4px;background:var(--bg4);color:var(--text);border:1px solid var(--border2)}
 
-.pv{font-family:var(--mono);font-size:16px;font-weight:700}
-.cv{font-family:var(--mono);font-size:13px}
+.pv{font-family:var(--mono);font-size:19px;font-weight:700}
+.cv{font-family:var(--mono);font-size:15px}
 .pv.up,.cv.up{color:var(--up)}.pv.dn,.cv.dn{color:var(--dn)}.pv.neu,.cv.neu{color:var(--text2)}
 
 .sbadge{display:inline-flex;align-items:center;justify-content:center;width:44px;height:28px;border-radius:6px;font-family:var(--mono);font-size:13px;font-weight:700}
@@ -345,8 +345,12 @@ tr.sel td{background:rgba(0,201,232,.07);border-left:2px solid var(--accent)}
       <button class="mgr-tab" id="mgr-tab-watch" onclick="switchMgrTab('watch')">觀察股</button>
     </div>
     <div class="mgr-add-row">
-      <input class="mgr-input" id="mgr-code-input" placeholder="輸入代號（如 2330）" maxlength="8">
-      <input class="mgr-input" id="mgr-name-input" placeholder="名稱（如 台積電）" maxlength="10" style="max-width:120px">
+      <input class="mgr-input" id="mgr-code-input" placeholder="代號（如 2330）" maxlength="8" style="width:90px">
+      <select id="mgr-market-input" class="mgr-input" style="width:65px;padding:3px 4px" title="上市選TW，上櫃選TWO">
+        <option value="TW">上市.TW</option>
+        <option value="TWO">上櫃.TWO</option>
+      </select>
+      <input class="mgr-input" id="mgr-name-input" placeholder="名稱（如 台積電）" maxlength="10" style="max-width:110px">
       <select class="mgr-select" id="mgr-sector-input">
         <option>半導體/封測</option><option>記憶體</option><option>塑化</option>
         <option>影像</option><option>電力</option><option>電信</option>
@@ -1994,16 +1998,16 @@ function renderTable() {
     const epsCell = fin.eps_ly != null
       ? `<div style="text-align:center;font-family:var(--mono);font-size:12px;line-height:1.8" title="${finsTip}">
            <span style="color:var(--text2)">${fin.eps_ly.toFixed(1)}</span><br>
-           <span style="color:${epsColor};font-size:11px">${fin.eps_ytd!=null?(fin.eps_ytd>0?'+':'')+fin.eps_ytd.toFixed(1):'—'}</span>
+           <span style="color:${epsColor};font-size:13px">${fin.eps_ytd!=null?(fin.eps_ytd>0?'+':'')+fin.eps_ytd.toFixed(1):'—'}</span>
            ${finsDate?'':'<br><span style="font-size:8px;color:var(--text3)">模擬</span>'}
          </div>`
       : `<div style="text-align:center;color:var(--text3)">—</div>`;
     const finNote = fin.fetchedAt ? fin.fetchedAt : (fin.eps_ly ? '模擬' : null);
     const gmCell = fin.gm != null
-      ? `<div style="text-align:center;font-family:var(--mono);font-size:13px;color:${fin.gm>=30?'var(--up)':fin.gm>=20?'var(--warn)':'var(--dn)'}" title="${finNote?'資料時間：'+finNote:''}">${fin.gm.toFixed(1)}%${finNote?`<br><span style="font-size:8px;color:var(--text3)">${finNote}</span>`:''}</div>`
+      ? `<div style="text-align:center;font-family:var(--mono);font-size:14px;color:${fin.gm>=30?'var(--up)':fin.gm>=20?'var(--warn)':'var(--dn)'}" title="${finNote?'資料時間：'+finNote:''}">${fin.gm.toFixed(1)}%${finNote?`<br><span style="font-size:8px;color:var(--text3)">${finNote}</span>`:''}</div>`
       : `<div style="text-align:center;color:var(--text3)">—</div>`;
     const yoyCell = fin.rev_yoy != null
-      ? `<div style="text-align:center;font-family:var(--mono);font-size:13px;font-weight:600;color:${fin.rev_yoy>0?'var(--up)':'var(--dn)'}" title="${finNote?'資料時間：'+finNote:''}">${fin.rev_yoy>0?'+':''}${fin.rev_yoy.toFixed(1)}%${finNote?`<br><span style="font-size:8px;color:var(--text3)">${finNote}</span>`:''}</div>`
+      ? `<div style="text-align:center;font-family:var(--mono);font-size:14px;font-weight:600;color:${fin.rev_yoy>0?'var(--up)':'var(--dn)'}" title="${finNote?'資料時間：'+finNote:''}">${fin.rev_yoy>0?'+':''}${fin.rev_yoy.toFixed(1)}%${finNote?`<br><span style="font-size:8px;color:var(--text3)">${finNote}</span>`:''}</div>`
       : `<div style="text-align:center;color:var(--text3)">—</div>`;
 
     const tr = document.createElement('tr');
@@ -2740,20 +2744,56 @@ function renderMgrList() {
     el.innerHTML = '<div class="mgr-empty">尚無個股，請新增</div>';
     return;
   }
+  const isHold = mgrCurrentTab === 'hold';
   el.innerHTML = stocks.map((s,i) => `
     <div class="mgr-item">
       <div class="mgr-item-code">${s.code.replace('.TWO','').replace('.TW','')}</div>
       <div class="mgr-item-name">${s.name}</div>
       <div class="mgr-item-sector">${s.sector}</div>
+      <button onclick="moveStock(${i})" style="font-size:10px;padding:2px 7px;background:rgba(0,201,232,.15);border:1px solid rgba(0,201,232,.4);color:var(--accent);border-radius:4px;cursor:pointer;margin-right:4px" title="${isHold?'移至觀察股':'移至庫存股'}">⇄ ${isHold?'→觀察':'→庫存'}</button>
       <button class="btn-del" onclick="deleteStock(${i})">✕ 刪除</button>
     </div>`).join('');
 }
+// ── 庫存/觀察股互相移動 ─────────────────────────────────
+function moveStock(idx) {
+  if (mgrCurrentTab === 'hold') {
+    // 庫存 → 觀察
+    const s = holdStocks[idx];
+    if (!s) return;
+    if (!confirm(`將「${s.name}」從庫存移至觀察股？`)) return;
+    watchStocks.push({...s});
+    holdStocks.splice(idx, 1);
+  } else {
+    // 觀察 → 庫存
+    const s = watchStocks[idx];
+    if (!s) return;
+    if (!confirm(`將「${s.name}」從觀察股移至庫存？`)) return;
+    holdStocks.push({...s});
+    watchStocks.splice(idx, 1);
+  }
+  document.getElementById('tc-hold').textContent  = holdStocks.length;
+  document.getElementById('tc-watch').textContent = watchStocks.length;
+  saveStocksToStorage();
+  renderMgrList();
+  buildFilters();
+  renderTable();
+  addLog('ok', '✅ 個股已移動');
+}
+
 function addStock() {
   const rawCode  = document.getElementById('mgr-code-input').value.trim().toUpperCase();
   const name     = document.getElementById('mgr-name-input').value.trim();
   const sector   = document.getElementById('mgr-sector-input').value;
   if (!rawCode || !name) { alert('請輸入代號和名稱'); return; }
-  const code = rawCode.includes('.TW') ? rawCode : rawCode + '.TW';
+  // 上市加 .TW，上櫃加 .TWO（代號後方已有標記則不重複）
+  let code;
+  if (rawCode.includes('.TWO')) code = rawCode;
+  else if (rawCode.includes('.TW'))  code = rawCode;
+  else {
+    // 根據 mgr-market-input 選擇市場
+    const market = document.getElementById('mgr-market-input')?.value || 'TW';
+    code = rawCode + '.' + market;
+  }
   const list = mgrCurrentTab === 'hold' ? holdStocks : watchStocks;
   const allStocks = [...holdStocks, ...watchStocks];
   if (allStocks.find(s => s.code === code)) { alert('此代號已存在'); return; }
@@ -2761,6 +2801,7 @@ function addStock() {
   list.push({code, name, type, sector});
   document.getElementById('mgr-code-input').value = '';
   document.getElementById('mgr-name-input').value = '';
+  if (document.getElementById('mgr-market-input')) document.getElementById('mgr-market-input').value = 'TW';
   document.getElementById('tc-hold').textContent  = holdStocks.length;
   document.getElementById('tc-watch').textContent = watchStocks.length;
   saveStocksToStorage();
