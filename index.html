@@ -2842,7 +2842,7 @@ function deleteStock(idx) {
   addLog('ok', `🗑 已刪除 ${delName}，清單已永久更新`);
 }
 
-// ── 個股單獨重抓財務 ─────────────────────────────────────
+// ── 個股單獨重抓財務（與 fetchFinsWithGemini 相同兩步驟邏輯）────
 async function refetchOneFin(code) {
   if (!geminiKey) { alert('請先設定 Gemini API Key'); return; }
   const stock = [...holdStocks,...watchStocks].find(s=>s.code===code);
@@ -2850,42 +2850,61 @@ async function refetchOneFin(code) {
   const no = code.replace('.TWO','').replace('.TW','');
   const btn = event?.target;
   if (btn) { btn.textContent='抓取中…'; btn.disabled=true; }
+  const GURL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
   try {
-    const prompt = `台股${no} ${stock.name} 最新財務：2025全年EPS、2026累積EPS、最新季毛利率%、最新月營收年增率%
-只回傳JSON，格式：{"${code}":{"eps_ly":數字,"eps_ytd":數字,"gm":數字,"rev_yoy":數字}}`;
-    const GEMINI_URL2 = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
-    const r = await fetch(GEMINI_URL2,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        contents:[{parts:[{text:prompt}]}],
-        tools:[{google_search:{}}],
-        generationConfig:{maxOutputTokens:500,temperature:0}
+    // Step1：Google Search Grounding 查財務文字（與全體抓財務相同）
+    const r1 = await fetch(GURL, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        contents:[{parts:[{text:`台股${no} ${stock.name} 最新財務：2025全年EPS、2026累積EPS、最新季毛利率%、最新月營收年增率%`}]}],
+        tools:[{"google_search":{}}],
+        generationConfig:{maxOutputTokens:2048,temperature:0}
       })
     });
+    const d1 = await r1.json();
     addGeminiCall(1);
-    const j = await r.json();
-    const text = (j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();
-    // 移除 markdown，並嘗試擷取第一個完整 JSON 物件
-    let clean = text.replace(/```json/g,'').replace(/```/g,'').trim();
-    // 若 JSON 被截斷，嘗試只取到最後一個完整的 }
-    const lastBrace = clean.lastIndexOf('}');
-    if (lastBrace !== -1) clean = clean.slice(0, lastBrace+1);
-    // 補上可能缺失的結尾括號
-    const openCount = (clean.match(/\{/g)||[]).length;
-    const closeCount = (clean.match(/\}/g)||[]).length;
-    for (let i=0; i<openCount-closeCount; i++) clean += '}';
-    const parsed = JSON.parse(clean);
-    if (parsed[code]) {
-      FINS[code] = Object.assign({}, FINS[code]||{}, parsed[code]);
+    if (d1.error) throw new Error(`Search: ${d1.error.message}`);
+    const searchTxt = (d1.candidates?.[0]?.content?.parts||[]).map(x=>x.text||'').join(' ').trim();
+    if (!searchTxt) throw new Error('搜尋無結果');
+    addLog('info', `${no} 搜尋完成，整理JSON中…`);
+
+    await new Promise(r=>setTimeout(r,1000));
+
+    // Step2：整理成 JSON（不用 Search，純格式化）
+    const r2 = await fetch(GURL, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        contents:[{parts:[{text:`根據以下資料只回JSON不要其他文字：
+資料：${searchTxt}
+格式：{"${code}":{"eps_ly":2025全年EPS數字,"eps_ytd":2026累積EPS數字,"gm":最新季毛利率數字,"rev_yoy":最新月營收年增率數字}}
+key必須是"${code}"，無法確認填null，只回JSON。`}]}],
+        generationConfig:{maxOutputTokens:800,temperature:0}
+      })
+    });
+    const d2 = await r2.json();
+    addGeminiCall(1);
+    if (d2.error) throw new Error(`Format: ${d2.error.message}`);
+    const txt2 = (d2.candidates?.[0]?.content?.parts||[]).map(x=>x.text||'').join('').trim();
+    let txt2c = txt2.replace(/```json/g,'').replace(/```/g,'').trim();
+    const si = txt2c.indexOf('{');
+    let ei = txt2c.lastIndexOf('}');
+    if (ei < si) { txt2c = txt2c.slice(si) + '}}'; ei = txt2c.lastIndexOf('}'); }
+    if (si<0||ei<=si) throw new Error('找不到有效JSON: '+txt2c.slice(0,80));
+    let row = JSON.parse(txt2c.slice(si,ei+1));
+    // key 對齊
+    const rowKeys = Object.keys(row);
+    if (rowKeys.length>0 && rowKeys[0]!==code) row = {[code]: row[rowKeys[0]]};
+    if (row[code]) {
+      FINS[code] = Object.assign({}, FINS[code]||{}, row[code]);
       try {
         const cache = JSON.parse(localStorage.getItem('fins_cache')||'{}');
         cache[code] = FINS[code];
         localStorage.setItem('fins_cache', JSON.stringify(cache));
       } catch(e) {}
+      const f = row[code];
+      addLog('ok', `✅ ${stock.name} EPS去年:${f.eps_ly} 今年:${f.eps_ytd} 毛:${f.gm}% YOY:${f.rev_yoy}%`);
       renderTable();
-      showDetail(code);  // 刷新詳情視窗
-      addLog('ok', `✅ ${stock.name} 財務更新完成`);
+      showDetail(code);
     }
   } catch(e) {
     addLog('warn', `${stock.name} 財務重抓失敗：${e.message}`);
