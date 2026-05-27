@@ -2865,9 +2865,7 @@ async function refetchOneFin(code) {
     addGeminiCall(1);
     const j = await r.json();
     const text = (j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();
-    const clean = text.replace(/```json
-?/g,'').replace(/```
-?/g,'').trim();
+    const clean = text.replace(/```json/g,'').replace(/```/g,'').trim();
     const parsed = JSON.parse(clean);
     if (parsed[code]) {
       FINS[code] = Object.assign({}, FINS[code]||{}, parsed[code]);
