@@ -1398,19 +1398,34 @@ async function fetchAllPrices() {
   renderTable();
   // 背景計算技術指標（不阻塞主流程）
   computeAllTechSignals().catch(()=>{});
-  // 補抓沒有 SPARK 資料的個股歷史走勢（新增個股首次抓取）
-  const noSpark = all.filter(s => !SPARK[s.code] || SPARK[s.code].length < 3);
-  if (noSpark.length > 0) {
-    addLog('info', `補抓 ${noSpark.length} 檔歷史走勢…`);
-    (async () => {
-      for (const s of noSpark) {
-        await fetchTWSEClose(s.code);
-        await new Promise(r=>setTimeout(r,600));
-      }
-      renderTable();
-      addLog('ok','歷史走勢補抓完成');
-    })();
-  }
+  // 補抓沒有 SPARK 資料的個股歷史走勢
+  // ★ 延遲3秒讓 computeAllTechSignals 先跑，避免重複抓取
+  setTimeout(async () => {
+    const noSpark = [...holdStocks,...watchStocks].filter(s => !SPARK[s.code] || SPARK[s.code].length < 3);
+    if (noSpark.length === 0) return;
+    addLog('info', `補抓 ${noSpark.length} 檔歷史走勢（含上櫃）…`);
+    for (const s of noSpark) {
+      try {
+        const no = s.code.replace('.TWO','').replace('.TW','');
+        const isOTC = s.code.endsWith('.TWO');
+        const tw = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
+        const yyyymmdd = tw.getFullYear()+String(tw.getMonth()+1).padStart(2,'0')+'01';
+        let rows = await fetchMonthlyOHLCV(no, isOTC, yyyymmdd);
+        if (!rows || rows.length < 3) {
+          const d2 = new Date(tw); d2.setMonth(d2.getMonth()-1);
+          const ym2 = d2.getFullYear()+String(d2.getMonth()+1).padStart(2,'0')+'01';
+          rows = await fetchMonthlyOHLCV(no, isOTC, ym2);
+        }
+        if (rows && rows.length >= 2) {
+          SPARK[s.code] = rows.slice(-5).map(r=>r.close).filter(v=>v>0);
+          addLog('ok', `✓ SPARK ${s.code}: ${SPARK[s.code].length}筆`);
+          renderTable();
+        }
+      } catch(e) { addLog('warn', `SPARK補抓 ${s.code}: ${e.message}`); }
+      await new Promise(r=>setTimeout(r,800));
+    }
+    addLog('ok','歷史走勢補抓完成');
+  }, 3000);
 }
 
 // ── LOG ──────────────────────────────────────────────────
@@ -1559,6 +1574,8 @@ async function fetchMonthlyOHLCV(stockNo, isOTC, yyyymmdd) {
   const proxies = [
     url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
     url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+    url => `https://thingproxy.freeboard.io/fetch/${url}`,
   ];
   const toF = s => parseFloat((s||'0').toString().replace(/,/g,'')) || 0;
 
@@ -2024,9 +2041,12 @@ function renderTable() {
     const instRaw = getInstData(stock.code);
     const inst    = instRaw?.net ?? null;
     const instSrc = instRaw?.isLive ? '今日' : instRaw?.savedDate ? instRaw.savedDate.slice(4,6)+'/'+instRaw.savedDate.slice(6,8) : null;
+    const isOtcStock = stock.code.endsWith('.TWO');
     const instCell = inst !== null
       ? '<div style="text-align:center;font-family:var(--mono);font-size:13px;font-weight:600;color:'+(inst>0?'var(--up)':inst<0?'var(--dn)':'var(--text2)')+'">'+(inst>0?'+':'')+fmt(inst)+'<br><span style="font-size:9px;color:var(--text3)">'+(inst>0?'買超':'賣超')+(instSrc?'・'+instSrc:'')+'</span></div>'
-      : '<div style="text-align:center;color:var(--text3);font-size:11px">—<br><span style="font-size:9px">↻抓取後顯示</span></div>';
+      : isOtcStock
+        ? '<div style="text-align:center;color:#3d5570;font-size:10px;line-height:1.4" title="上櫃股三大法人數據因CORS限制無法取得">上櫃<br><span style="font-size:9px">無法取得</span></div>'
+        : '<div style="text-align:center;color:var(--text3);font-size:11px">—<br><span style="font-size:9px">↻抓取後顯示</span></div>';
 
     const chgCell = (pd && chg !== null && pct !== null)
       ? `<div class="cv ${cls(pct)}">${chg >= 0 ? '+' : ''}${fmt(chg, 2)}<br>
@@ -2253,6 +2273,10 @@ async function computeAllTechSignals() {
       const ind = await fetchTechIndicators(stock.code);
       if (ind) {
         SIGS[stock.code] = buildSigTags(stock.code, ind);
+        // ★ 同步更新 SPARK：取最近5筆真實收盤（覆蓋硬編碼模擬值，含新增個股）
+        if (ind.closes && ind.closes.length >= 2) {
+          SPARK[stock.code] = ind.closes.slice(-5);
+        }
         addLog('ok', `技術指標 ${stock.code}: ${SIGS[stock.code].join(' ')}`);
       }
     } catch(e) {}
@@ -2413,14 +2437,23 @@ function updateKeyIndicator() {
 async function runAI(code, name, sector) {
   const stock = [...holdStocks, ...watchStocks].find(s => s.code === code);
   const pd    = priceData[code];
+  // ★ 若無技術指標快取，AI分析前先自動抓取（確保prompt數據完整）
+  if (!techCache[code]) {
+    addLog('info', `[AI] 預載 ${code} 技術指標…`);
+    try {
+      const ind = await fetchTechIndicators(code);
+      if (ind) { techCache[code]=ind; SIGS[code]=buildSigTags(code,ind); if(ind.closes?.length>=2) SPARK[code]=ind.closes.slice(-5); }
+    } catch(e) {}
+  }
   const sc    = calcScore(stock, pd);
   const fin2 = FINS[code] || {};
   const modeStr   = currentMode === 'before' ? '盤前' : '盤後';
   const modeColor = currentMode === 'before' ? '#00c9e8' : '#00e676';
   const instRaw3_pre = getInstData(code);
+  const _isOtcCode = code.endsWith('.TWO');
   const instStr_pre  = instRaw3_pre
     ? `外資${instRaw3_pre.f>=0?'+':''}${instRaw3_pre.f}張，投信${instRaw3_pre.i>=0?'+':''}${instRaw3_pre.i}張，自營${instRaw3_pre.d>=0?'+':''}${instRaw3_pre.d}張，三大合計${instRaw3_pre.net>=0?'+':''}${instRaw3_pre.net}張`
-    : '尚未取得（請先執行抓取報價）';
+    : _isOtcCode ? '上櫃股法人數據因瀏覽器CORS限制無法直接取得，請根據該股產業類別與近期盤面特性進行籌碼方向判斷' : '尚未取得（請先執行抓取報價）';
   const techDetail_pre = (()=>{
     const c=techCache[code];
     if(!c) return '尚未取得（請先執行抓取報價）';
@@ -2432,30 +2465,8 @@ async function runAI(code, name, sector) {
     return parts.join('；') || '計算中';
   })();
   const modeInstr = currentMode === 'before'
-    ? `請依序輸出以下5個段落，每段以【標題】開頭，每段50-100字，不可省略任何段落：
-
-【技術形態與開盤預判】請根據以下數據分析：昨收${pd?.prev??'—'}元，技術指標：${techDetail_pre}。判斷今日開盤偏多/偏空/中性，說明關鍵支撐與壓力位。
-
-【總體經濟影響】產業為${sector||stock?.sector||'不明'}。說明當前美股、匯率、利率環境對此產業的具體影響，給出利多或利空明確結論。
-
-【法人籌碼方向】法人數據：${instStr_pre}。依據以上數值分析外資、投信、自營商各自方向，判斷整體籌碼偏多或偏空。
-
-【操作建議】綜合技術面與籌碼面，明確給出買進/持有/觀察/賣出其中一個，說明建議價位與理由。
-
-【主要風險】列出2-3個具體下行風險點。`
-    : `請依序輸出以下6個段落，每段以【標題】開頭，每段50-100字，不可省略任何段落：
-
-【今日量價複盤】今日數據：收盤${pd?.price??'—'}元，成交量${pd?fmt(pd.vol,0)+'張':'—'}，區間${pd?pd.low+'～'+pd.high:'—'}元。分析量價走勢含意，說明多空力道強弱。
-
-【技術指標現況】指標數據：${techDetail_pre}。依序分析MACD多空排列與金叉死叉、KD超買超賣與交叉訊號、RSI數值區間操作提示、布林通道股價位置與帶寬狀態，最後給出技術面偏多/偏空/中性的最佳決策建議。
-
-【法人買賣超解讀】法人數據：${instStr_pre}。分析外資、投信、自營商各自買賣方向，解讀三大法人合計張數對後市的影響與含意。
-
-【財務數據評估】財務數據：EPS去年${fin2.eps_ly??'—'}元/今年累積${fin2.eps_ytd??'—'}元，毛利率${fin2.gm??'—'}%，營收YOY ${fin2.rev_yoy??'—'}%。評估基本面強弱，給出財務面結論。
-
-【明日操作策略】明確給出買進/持有/觀察/賣出其中一個，含建議進場價位與停損點。
-
-【評分說明】本次評分${sc.score}/100，說明主要加分或扣分原因。`;
+    ? `請依序輸出以下5個段落，每段以【標題】開頭（不可更改標題文字），正文80-130字，段落間空一行，5段缺一不可：\n\n【技術形態與開盤預判】昨收${pd?.prev??'—'}元，技術指標：${techDetail_pre}。判斷今日開盤偏多/偏空/中性，給出具體支撐壓力價位數字。\n\n【總體經濟影響】產業：${sector||stock?.sector||'不明'}。分析美股走勢、台幣匯率、聯準會利率政策對此產業的具體影響，明確結論「利多」或「利空」。\n\n【法人籌碼方向】法人數據：${instStr_pre}。分析外資/投信/自營商各自方向，給出「籌碼偏多」或「籌碼偏空」明確結論。\n\n【操作建議】明確給出「買進」「持有」「觀察」「減碼」其中一個，含建議進場/出場價位。\n\n【主要風險】列出3個具體下行風險點（技術面、基本面、總經面各一），每點勿超過25字。`
+    : `請依序輸出以下6個段落，每段以【標題】開頭（不可更改標題文字），正文80-130字，段落間空一行，6段缺一不可：\n\n【今日量價複盤】收盤${pd?.price??'—'}元，成交${pd?fmt(pd.vol,0)+'張':'—'}，區間${pd?pd.low+'～'+pd.high:'—'}元。分析量價走勢強弱含意，判斷多空力道。\n\n【技術指標現況】指標：${techDetail_pre}。依序分析MACD多空排列/金叉死叉、KD超買超賣/交叉、RSI區間操作提示、布林通道位置，最後給出「技術面偏多/偏空/中性」明確結論。\n\n【法人買賣超解讀】法人數據：${instStr_pre}。解讀外資/投信/自營商各自方向與三大法人合計對後市的影響，給出「籌碼偏多/偏空」結論。\n\n【財務數據評估】EPS去年${fin2.eps_ly??'—'}元/今年累積${fin2.eps_ytd??'—'}元，毛利率${fin2.gm??'—'}%，營收YOY ${fin2.rev_yoy??'—'}%。評估基本面是否支撐現價，給出「基本面強/中/弱」明確結論。\n\n【明日操作策略】明確給出「買進」「持有」「觀察」「減碼」其中一個，含具體進場價位區間與停損點設定。\n\n【評分說明】本次評分${sc.score}/100，具體說明加分項目（技術/籌碼/基本面）與扣分原因，讓投資人理解評分依據。`;
 
   const instRaw3  = getInstData(code);
   const instStr   = instRaw3 ? `三大法人合計${instRaw3.net>=0?'+':''}${instRaw3.net}張（外資${instRaw3.f>=0?'+':''}${instRaw3.f}，投信${instRaw3.i>=0?'+':''}${instRaw3.i}，自營${instRaw3.d>=0?'+':''}${instRaw3.d}）` : '尚未取得';
@@ -2540,9 +2551,9 @@ ${modeInstr}
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        system_instruction: {parts: [{text: '你是專業台股分析師。規則：①全程繁體中文。②每個【標題】段落都必須輸出，每段50-100字，總字數400-600字。③嚴禁省略任何段落，否則視為失敗。④輸出格式：每個段落以【標題】開頭，內容緊接在後，段落間空一行。'}]},
+        system_instruction: {parts: [{text: '你是專業台股分析師。【強制輸出規則】：①全程繁體中文。②prompt要求幾個【標題】段落，必須全部輸出，一段都不能少，違者視為輸出失敗。③每段標題格式：【標題】，正文緊接其後，段落間空一行，每段80-130字。④數據欄位顯示「—」或「CORS限制」時，請根據股票代號、產業特性、近期市場環境進行合理推測分析，禁止輸出「資料不足」「無法分析」等推卸字眼，必須給出具體見解。'}]},
         contents: [{parts: [{text: prompt}]}],
-        generationConfig: {maxOutputTokens: 3000, temperature: 0.4}
+        generationConfig: {maxOutputTokens: 4000, temperature: 0.4}
       })
     });
     if (!r.ok) {
