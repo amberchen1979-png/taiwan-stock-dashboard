@@ -944,6 +944,10 @@ async function fetchTWSEClose(code) {
 // ══════════════════════════════════════════════════════════
 let instCache = {};
 
+// ★★ Vercel Proxy 設定（頂層全域變數，所有函數共用）
+// 完成 Vercel 部署後，把網址填入下方引號內：
+const VERCEL_PROXY_URL = 'https://taiwan-stock-proxy.vercel.app';
+
 function getTodayDateStr() {
   const d = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
   return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
@@ -965,16 +969,39 @@ async function fetchWithRetry(url, options={}, maxRetry=3, delay=2000) {
 }
 
 async function fetchTWSEInst(dateStr) {
+  // ★ 先嘗試 TWSE OpenAPI（免 Proxy，直接 CORS 可過）
+  try {
+    const openUrl = `https://openapi.twse.com.tw/v1/fund/T86`;
+    const ro = await fetch(openUrl, {signal: AbortSignal.timeout(8000)});
+    if (ro.ok) {
+      const arr = await ro.json();
+      if (Array.isArray(arr) && arr.length > 0) {
+        const result = {};
+        arr.forEach(row => {
+          const no  = (row['證券代號']||'').trim();
+          const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
+          const f   = toZ(row['外陸資買賣超股數']);
+          const i   = toZ(row['投信買賣超股數']);
+          const d2  = toZ(row['自營商買賣超股數(合計)']||row['自營商買賣超股數']);
+          const net = toZ(row['三大法人買賣超股數']);
+          if (no) result[no] = {f, i, d:d2, net, src:'twse'};
+        });
+        if (Object.keys(result).length > 0) {
+          addLog('ok', `TWSE三大法人（OpenAPI）：${Object.keys(result).length} 筆`);
+          return result;
+        }
+      }
+    }
+  } catch(e) { addLog('warn', `TWSE OpenAPI失敗: ${e.message}，改用Proxy…`); }
+
   const url = 'https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date='+dateStr+'&selectType=ALLBUT0999';
-  // proxy 順序：corsproxy.io → allorigins → codetabs
   const proxies = [
     'https://corsproxy.io/?'+encodeURIComponent(url),
     'https://api.allorigins.win/raw?url='+encodeURIComponent(url),
     'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(url),
   ];
   for (const proxy of proxies) {
-    // 每個 proxy 最多重試 3 次
-    const r = await fetchWithRetry(proxy, {}, 3, 2000);
+    const r = await fetchWithRetry(proxy, {}, 2, 1500);
     if (!r) { addLog('warn', 'TWSE T86 proxy 失敗，換下一個…'); continue; }
     try {
       const j = await r.json();
@@ -1023,10 +1050,7 @@ async function fetchTPExInst(dateStr) {
     return Object.keys(result).length > 0 ? result : null;
   }
 
-  // ══ 方案A：自建 Vercel Proxy（需先設定 VERCEL_PROXY_URL）══
-  // 若你已部署 Vercel proxy，在下一行填入你的域名：
-  const VERCEL_PROXY_URL = ''; // 例如: 'https://taiwan-stock-proxy.vercel.app'
-  window.VERCEL_PROXY_URL = VERCEL_PROXY_URL; // ★ 暴露給 fetchMonthlyOHLCV 使用
+  // ══ 方案A：自建 Vercel Proxy（使用頂層全域變數 VERCEL_PROXY_URL）══
   if (VERCEL_PROXY_URL) {
     try {
       const proxyUrl = `${VERCEL_PROXY_URL}/api/tpex?date=${encodeURIComponent(tpDate)}`;
@@ -1084,7 +1108,8 @@ async function fetchInstitutional() {
 
   addLog('info','抓取三大法人（'+today+'）…');
   const [twse, tpex] = await Promise.all([fetchTWSEInst(today), fetchTPExInst(today)]);
-  const merged = {...twse, ...tpex};
+  // ★ 合併時 TWSE 優先：避免 TPEx 同代號覆蓋 TWSE 資料
+  const merged = {...tpex, ...twse};
   if (Object.keys(merged).length > 0) {
     instCache = {date: today, data: merged};
     try { localStorage.setItem('inst_cache', JSON.stringify(instCache)); } catch(e) {}
@@ -1639,8 +1664,6 @@ async function fetchMonthlyOHLCV(stockNo, isOTC, yyyymmdd) {
   const dateRoc = `${rocY}/${mmStr}/01`;
 
   // ★ 若有 Vercel Proxy，優先透過它抓 TPEx 月線（server端無CORS限制）
-  const VERCEL_PROXY_URL = typeof window.VERCEL_PROXY_URL !== 'undefined'
-    ? window.VERCEL_PROXY_URL : '';
   if (VERCEL_PROXY_URL) {
     try {
       const vUrl = `${VERCEL_PROXY_URL}/api/tpex?type=monthly&date=${encodeURIComponent(dateRoc)}&stockno=${stockNo}`;
@@ -2097,7 +2120,7 @@ function renderTable() {
     const instRaw = getInstData(stock.code);
     const inst    = instRaw?.net ?? null;
     const instSrc = instRaw?.isLive ? '今日' : instRaw?.savedDate ? instRaw.savedDate.slice(4,6)+'/'+instRaw.savedDate.slice(6,8) : null;
-    const isOtcStock = stock.code.endsWith('.TWO');
+    const isOtcStock = stock.code.endsWith('.TWO') || stock.market === 'otc';
     const instCell = inst !== null
       ? '<div style="text-align:center;font-family:var(--mono);font-size:13px;font-weight:600;color:'+(inst>0?'var(--up)':inst<0?'var(--dn)':'var(--text2)')+'">'+(inst>0?'+':'')+fmt(inst)+'<br><span style="font-size:9px;color:var(--text3)">'+(inst>0?'買超':'賣超')+(instSrc?'・'+instSrc:'')+'</span></div>'
       : isOtcStock
