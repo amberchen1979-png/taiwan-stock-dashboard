@@ -1025,7 +1025,8 @@ async function fetchTPExInst(dateStr) {
 
   // ══ 方案A：自建 Vercel Proxy（需先設定 VERCEL_PROXY_URL）══
   // 若你已部署 Vercel proxy，在下一行填入你的域名：
-  const VERCEL_PROXY_URL = 'https://taiwan-stock-proxy.vercel.app'; // 例如: 'https://taiwan-stock-proxy.vercel.app'
+  const VERCEL_PROXY_URL = ''; // 例如: 'https://taiwan-stock-proxy.vercel.app'
+  window.VERCEL_PROXY_URL = VERCEL_PROXY_URL; // ★ 暴露給 fetchMonthlyOHLCV 使用
   if (VERCEL_PROXY_URL) {
     try {
       const proxyUrl = `${VERCEL_PROXY_URL}/api/tpex?date=${encodeURIComponent(tpDate)}`;
@@ -1074,7 +1075,7 @@ async function fetchInstitutional() {
   // 再從 localStorage 讀
   try {
     const saved = JSON.parse(localStorage.getItem('inst_cache')||'{}');
-    if (saved.date === today && Object.keys(saved.data||{}).length > 0) {
+    if (saved.date === today && Object.keys(saved.data||{}).length > 50) {
       instCache = saved;
       addLog('info','三大法人讀取本地快取（'+Object.keys(saved.data).length+' 筆）');
       return saved.data;
@@ -1637,6 +1638,32 @@ async function fetchMonthlyOHLCV(stockNo, isOTC, yyyymmdd) {
   const mmStr  = String(twDate.getMonth()+1).padStart(2,'0');
   const dateRoc = `${rocY}/${mmStr}/01`;
 
+  // ★ 若有 Vercel Proxy，優先透過它抓 TPEx 月線（server端無CORS限制）
+  const VERCEL_PROXY_URL = typeof window.VERCEL_PROXY_URL !== 'undefined'
+    ? window.VERCEL_PROXY_URL : '';
+  if (VERCEL_PROXY_URL) {
+    try {
+      const vUrl = `${VERCEL_PROXY_URL}/api/tpex?type=monthly&date=${encodeURIComponent(dateRoc)}&stockno=${stockNo}`;
+      const r = await fetch(vUrl, {signal: AbortSignal.timeout(10000)});
+      if (r.ok) {
+        const j = await r.json();
+        const rows = j.aaData || [];
+        if (rows.length > 0) {
+          const parsed = rows.map(row => ({
+            date:  String(row[0]||''),
+            open:  toF(row[8]), high: toF(row[9]),
+            low:   toF(row[10]), close: toF(row[3]),
+            vol:   Math.round(toF(row[6])),
+          })).filter(d => d.close > 0);
+          if (parsed.length > 0) {
+            addLog('ok', `TPEx月線(Vercel) ${stockNo} ${dateRoc}: ${parsed.length}筆`);
+            return parsed;
+          }
+        }
+      }
+    } catch(e) { /* fallback to proxy */ }
+  }
+
   const tpexUrls = [
     `https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock/exchange?date=${dateRoc}&stockCode=${stockNo}&response=json`,
     `https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock/result?date=${dateRoc}&stockCode=${stockNo}&response=json`,
@@ -1792,7 +1819,7 @@ async function fetchTechIndicators(code) {
   const results = await Promise.all(months.map(m => fetchMonthlyOHLCV(no, isOTC, m)));
   const all = results.flat().sort((a,b) => a.date.localeCompare(b.date));
 
-  if (all.length < 20) return null;  // 資料不足
+  if (all.length < 10) return null;  // 資料不足（放寬至10筆）
 
   const closes = all.map(d=>d.close);
   const highs  = all.map(d=>d.high);
@@ -2175,6 +2202,19 @@ function renderTable() {
 // ── DETAIL MODAL ─────────────────────────────────────────
 function selStk(code) {
   showDetail(code);
+  // ★ 若無技術訊號，自動背景抓取並更新 modal
+  if (!SIGS[code] || SIGS[code].length === 0) {
+    fetchTechIndicators(code).then(ind => {
+      if (!ind) return;
+      techCache[code] = ind;
+      SIGS[code] = buildSigTags(code, ind);
+      if (ind.closes?.length >= 2) SPARK[code] = ind.closes.slice(-5);
+      // 更新已開啟的 modal 中的技術訊號區塊
+      const sigDiv = document.getElementById(`det-sigs-${code}`);
+      if (sigDiv) sigDiv.innerHTML = pillsAllHTML(code);
+      renderTable(); // 更新主表格 SPARK
+    }).catch(() => {});
+  }
 }
 
 function closeDetail() {
@@ -2256,7 +2296,11 @@ function showDetail(code) {
       </div>
       <div style="margin-bottom:12px">
         <div style="font-size:11px;color:var(--text2);font-weight:500;margin-bottom:6px">技術訊號</div>
-        <div class="spills" style="justify-content:flex-start">${pillsAllHTML(code)}</div>
+        <div class="spills" style="justify-content:flex-start" id="det-sigs-${code}">
+          ${(SIGS[code]||[]).length > 0
+            ? pillsAllHTML(code)
+            : '<span style="font-size:11px;color:var(--text3)">計算中，請稍候…</span>'}
+        </div>
       </div>
       <div class="ai-box">
         <div class="ai-hdr">
