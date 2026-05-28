@@ -972,7 +972,7 @@ async function fetchTWSEInst(dateStr) {
   if (VERCEL_PROXY_URL) {
     try {
       const vUrl = `${VERCEL_PROXY_URL}/api/twse?type=t86&date=${dateStr}`;
-      const r = await fetch(vUrl, {signal: AbortSignal.timeout(12000)});
+      const r = await fetch(vUrl, {signal: AbortSignal.timeout(25000)});  // T86資料量大，給25秒
       if (r.ok) {
         const j = await r.json();
         if (j?.stat === 'OK' && j?.data?.length > 0) {
@@ -992,7 +992,7 @@ async function fetchTWSEInst(dateStr) {
           }
         }
       }
-    } catch(e) { addLog('warn', `Vercel TWSE T86失敗: ${e.message}，改用Proxy…`); }
+    } catch(e) { addLog('warn', `Vercel TWSE T86失敗: ${e.message}（timeout=${e.name}），改用Proxy…`); }
   }
 
   // ★ 方案B：CORS Proxy 備援
@@ -1004,7 +1004,7 @@ async function fetchTWSEInst(dateStr) {
   ];
   for (const proxy of proxies) {
     // 每個 proxy 最多重試 3 次
-    const r = await fetchWithRetry(proxy, {}, 3, 2000);
+    const r = await fetchWithRetry(proxy, {}, 1, 1000);
     if (!r) { addLog('warn', 'TWSE T86 proxy 失敗，換下一個…'); continue; }
     try {
       const j = await r.json();
