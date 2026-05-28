@@ -1001,37 +1001,66 @@ async function fetchTPExInst(dateStr) {
   // 民國年轉換：yyyymmdd → yyy/mm/dd
   const year = parseInt(dateStr.slice(0,4)) - 1911;
   const tpDate = year+'/'+dateStr.slice(4,6)+'/'+dateStr.slice(6,8);
-  // allorigins 對此 endpoint 可通（se=EW 為上櫃一般股）
-  const url = 'https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&d='+tpDate+'&se=EW&s=0,asc&o=json';
+  const tpexDirectUrl = 'https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&d='+tpDate+'&se=EW&s=0,asc&o=json';
+
+  // ★ 解析 TPEx JSON 共用函數
+  function parseTPExInst(j) {
+    const rows = j.tables?.[0]?.data || j.aaData || [];
+    if (!rows.length) return null;
+    const result = {};
+    const toZ = s => Math.round(parseInt((s||'0').replace(/,/g,''))||0);
+    rows.forEach(row => {
+      const no = (row[0]||'').trim();
+      if (!no || no.length < 4) return;
+      // TPEx 3insti欄位：[4]外資買賣超(股) [7]投信(股) [13]自營商含避險(股) [23]三大合計(股)
+      // 股數÷1000=張
+      const f   = Math.trunc(toZ(row[4])  / 1000);
+      const i2  = Math.trunc(toZ(row[7])  / 1000);
+      const d2  = Math.trunc(toZ(row[13]) / 1000);
+      const net = Math.trunc(toZ(row[23]) / 1000);
+      result[no] = {f, i:i2, d:d2, net, src:'tpex'};
+    });
+    return Object.keys(result).length > 0 ? result : null;
+  }
+
+  // ══ 方案A：自建 Vercel Proxy（需先設定 VERCEL_PROXY_URL）══
+  // 若你已部署 Vercel proxy，在下一行填入你的域名：
+  const VERCEL_PROXY_URL = 'https://taiwan-stock-proxy.vercel.app'; // 例如: 'https://taiwan-stock-proxy.vercel.app'
+  if (VERCEL_PROXY_URL) {
+    try {
+      const proxyUrl = `${VERCEL_PROXY_URL}/api/tpex?date=${encodeURIComponent(tpDate)}`;
+      const r = await fetch(proxyUrl, {signal: AbortSignal.timeout(12000)});
+      if (r.ok) {
+        const j = await r.json();
+        const result = parseTPExInst(j);
+        if (result) {
+          addLog('ok', `✓ TPEx三大法人（Vercel）：${Object.keys(result).length}筆`);
+          return result;
+        }
+      }
+    } catch(e) { addLog('warn', `Vercel proxy失敗: ${e.message}，改用備援…`); }
+  }
+
+  // ══ 方案B：一般 CORS Proxy 備援（可能被TPEx封鎖）══
   const proxies = [
-    'https://corsproxy.io/?'+encodeURIComponent(url),
-    'https://api.allorigins.win/raw?url='+encodeURIComponent(url),
-    'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(url),
+    'https://corsproxy.io/?'+encodeURIComponent(tpexDirectUrl),
+    'https://api.allorigins.win/raw?url='+encodeURIComponent(tpexDirectUrl),
+    'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(tpexDirectUrl),
   ];
   for (const proxy of proxies) {
     const r = await fetchWithRetry(proxy, {}, 2, 2000);
     if (!r) continue;
     try {
       const j = await r.json();
-      const rows = j.tables?.[0]?.data || [];
-      if (rows.length === 0) { addLog('warn','TPEx 當日資料尚未更新'); continue; }
-      const result = {};
-      const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
-      rows.forEach(row => {
-        const no = (row[0]||'').trim();
-        const f   = toZ(row[4]);   // 外資買賣超股數÷1000=張 [4]
-        const i2  = toZ(row[7]);   // 投信買賣超股數÷1000=張 [7]
-        const d2  = toZ(row[13]);  // 自營商含避險÷1000=張 [13]
-        const net = toZ(row[23]);  // 三大法人合計÷1000=張 [23]
-        if (no) result[no] = {f, i:i2, d:d2, net, src:'tpex'};
-      });
-      if (Object.keys(result).length > 0) {
-        addLog('ok','TPEx三大法人：'+Object.keys(result).length+' 筆（allorigins）');
+      const result = parseTPExInst(j);
+      if (result) {
+        addLog('ok','TPEx三大法人（proxy）：'+Object.keys(result).length+' 筆');
         return result;
       }
+      addLog('warn','TPEx 當日資料尚未更新或格式異常');
     } catch(e) { addLog('warn','TPEx JSON解析失敗：'+e.message); }
   }
-  addLog('warn','TPEx三大法人資料尚未更新或抓取失敗');
+  addLog('warn','TPEx三大法人抓取失敗（CORS限制，建議設定 Vercel Proxy）');
   return {};
 }
 
