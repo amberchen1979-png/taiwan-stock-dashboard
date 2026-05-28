@@ -2142,7 +2142,7 @@ function renderTable() {
     // 昨收：優先用API的chartPreviousClose，次選反推，並標示可靠度
     const prevClose = (() => {
     if (!pd) return null;
-    if (pd.src === 'twse') return pd.price;
+    if (pd.src === 'twse') return pd.prev;  // 盤後昨收取 prev 欄位
     return (pd.prev && pd.prev > 0) ? pd.prev : null;
   })();
     const prevSrc   = pd?.prev ? 'API' : 'est';  // API=直接取得 est=反推估算
