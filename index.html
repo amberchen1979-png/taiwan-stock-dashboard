@@ -944,8 +944,7 @@ async function fetchTWSEClose(code) {
 // ══════════════════════════════════════════════════════════
 let instCache = {};
 
-// ★★ Vercel Proxy 設定（頂層全域變數，所有函數共用）
-// 完成 Vercel 部署後，把網址填入下方引號內：
+// ★ Vercel Proxy 設定（全域變數，部署後填入你的網址）
 const VERCEL_PROXY_URL = 'https://taiwan-stock-proxy.vercel.app';
 
 function getTodayDateStr() {
@@ -969,39 +968,16 @@ async function fetchWithRetry(url, options={}, maxRetry=3, delay=2000) {
 }
 
 async function fetchTWSEInst(dateStr) {
-  // ★ 先嘗試 TWSE OpenAPI（免 Proxy，直接 CORS 可過）
-  try {
-    const openUrl = `https://openapi.twse.com.tw/v1/fund/T86`;
-    const ro = await fetch(openUrl, {signal: AbortSignal.timeout(8000)});
-    if (ro.ok) {
-      const arr = await ro.json();
-      if (Array.isArray(arr) && arr.length > 0) {
-        const result = {};
-        arr.forEach(row => {
-          const no  = (row['證券代號']||'').trim();
-          const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
-          const f   = toZ(row['外陸資買賣超股數']);
-          const i   = toZ(row['投信買賣超股數']);
-          const d2  = toZ(row['自營商買賣超股數(合計)']||row['自營商買賣超股數']);
-          const net = toZ(row['三大法人買賣超股數']);
-          if (no) result[no] = {f, i, d:d2, net, src:'twse'};
-        });
-        if (Object.keys(result).length > 0) {
-          addLog('ok', `TWSE三大法人（OpenAPI）：${Object.keys(result).length} 筆`);
-          return result;
-        }
-      }
-    }
-  } catch(e) { addLog('warn', `TWSE OpenAPI失敗: ${e.message}，改用Proxy…`); }
-
   const url = 'https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date='+dateStr+'&selectType=ALLBUT0999';
+  // proxy 順序：corsproxy.io → allorigins → codetabs
   const proxies = [
     'https://corsproxy.io/?'+encodeURIComponent(url),
     'https://api.allorigins.win/raw?url='+encodeURIComponent(url),
     'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(url),
   ];
   for (const proxy of proxies) {
-    const r = await fetchWithRetry(proxy, {}, 2, 1500);
+    // 每個 proxy 最多重試 3 次
+    const r = await fetchWithRetry(proxy, {}, 3, 2000);
     if (!r) { addLog('warn', 'TWSE T86 proxy 失敗，換下一個…'); continue; }
     try {
       const j = await r.json();
@@ -1028,64 +1004,69 @@ async function fetchTPExInst(dateStr) {
   // 民國年轉換：yyyymmdd → yyy/mm/dd
   const year = parseInt(dateStr.slice(0,4)) - 1911;
   const tpDate = year+'/'+dateStr.slice(4,6)+'/'+dateStr.slice(6,8);
-  const tpexDirectUrl = 'https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&d='+tpDate+'&se=EW&s=0,asc&o=json';
 
-  // ★ 解析 TPEx JSON 共用函數
-  function parseTPExInst(j) {
-    const rows = j.tables?.[0]?.data || j.aaData || [];
-    if (!rows.length) return null;
-    const result = {};
-    const toZ = s => Math.round(parseInt((s||'0').replace(/,/g,''))||0);
-    rows.forEach(row => {
-      const no = (row[0]||'').trim();
-      if (!no || no.length < 4) return;
-      // TPEx 3insti欄位：[4]外資買賣超(股) [7]投信(股) [13]自營商含避險(股) [23]三大合計(股)
-      // 股數÷1000=張
-      const f   = Math.trunc(toZ(row[4])  / 1000);
-      const i2  = Math.trunc(toZ(row[7])  / 1000);
-      const d2  = Math.trunc(toZ(row[13]) / 1000);
-      const net = Math.trunc(toZ(row[23]) / 1000);
-      result[no] = {f, i:i2, d:d2, net, src:'tpex'};
-    });
-    return Object.keys(result).length > 0 ? result : null;
-  }
-
-  // ══ 方案A：自建 Vercel Proxy（使用頂層全域變數 VERCEL_PROXY_URL）══
+  // ★ 方案A：Vercel Proxy（優先，server端無CORS限制）
   if (VERCEL_PROXY_URL) {
     try {
-      const proxyUrl = `${VERCEL_PROXY_URL}/api/tpex?date=${encodeURIComponent(tpDate)}`;
-      const r = await fetch(proxyUrl, {signal: AbortSignal.timeout(12000)});
+      const vUrl = `${VERCEL_PROXY_URL}/api/tpex?date=${encodeURIComponent(tpDate)}`;
+      const r = await fetch(vUrl, {signal: AbortSignal.timeout(12000)});
       if (r.ok) {
         const j = await r.json();
-        const result = parseTPExInst(j);
-        if (result) {
-          addLog('ok', `✓ TPEx三大法人（Vercel）：${Object.keys(result).length}筆`);
-          return result;
+        const rows = j.tables?.[0]?.data || j.aaData || [];
+        if (rows.length > 0) {
+          const result = {};
+          const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
+          rows.forEach(row => {
+            const no = (row[0]||'').trim();
+            if (!no || no.length < 4) return;
+            result[no] = {
+              f:   toZ(row[4]),
+              i:   toZ(row[7]),
+              d:   toZ(row[13]),
+              net: toZ(row[23]),
+              src: 'tpex'
+            };
+          });
+          if (Object.keys(result).length > 0) {
+            addLog('ok', `✓ TPEx三大法人（Vercel）：${Object.keys(result).length}筆`);
+            return result;
+          }
         }
       }
-    } catch(e) { addLog('warn', `Vercel proxy失敗: ${e.message}，改用備援…`); }
+    } catch(e) { addLog('warn', `Vercel TPEx失敗: ${e.message}，改用Proxy…`); }
   }
 
-  // ══ 方案B：一般 CORS Proxy 備援（可能被TPEx封鎖）══
+  // ★ 方案B：CORS Proxy 備援（原本邏輯保留）
+  const url = 'https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&d='+tpDate+'&se=EW&s=0,asc&o=json';
   const proxies = [
-    'https://corsproxy.io/?'+encodeURIComponent(tpexDirectUrl),
-    'https://api.allorigins.win/raw?url='+encodeURIComponent(tpexDirectUrl),
-    'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(tpexDirectUrl),
+    'https://corsproxy.io/?'+encodeURIComponent(url),
+    'https://api.allorigins.win/raw?url='+encodeURIComponent(url),
+    'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(url),
   ];
   for (const proxy of proxies) {
     const r = await fetchWithRetry(proxy, {}, 2, 2000);
     if (!r) continue;
     try {
       const j = await r.json();
-      const result = parseTPExInst(j);
-      if (result) {
-        addLog('ok','TPEx三大法人（proxy）：'+Object.keys(result).length+' 筆');
+      const rows = j.tables?.[0]?.data || [];
+      if (rows.length === 0) { addLog('warn','TPEx 當日資料尚未更新'); continue; }
+      const result = {};
+      const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
+      rows.forEach(row => {
+        const no = (row[0]||'').trim();
+        const f   = toZ(row[4]);   // 外資買賣超股數÷1000=張 [4]
+        const i2  = toZ(row[7]);   // 投信買賣超股數÷1000=張 [7]
+        const d2  = toZ(row[13]);  // 自營商含避險÷1000=張 [13]
+        const net = toZ(row[23]);  // 三大法人合計÷1000=張 [23]
+        if (no) result[no] = {f, i:i2, d:d2, net, src:'tpex'};
+      });
+      if (Object.keys(result).length > 0) {
+        addLog('ok','TPEx三大法人：'+Object.keys(result).length+' 筆（allorigins）');
         return result;
       }
-      addLog('warn','TPEx 當日資料尚未更新或格式異常');
     } catch(e) { addLog('warn','TPEx JSON解析失敗：'+e.message); }
   }
-  addLog('warn','TPEx三大法人抓取失敗（CORS限制，建議設定 Vercel Proxy）');
+  addLog('warn','TPEx三大法人資料尚未更新或抓取失敗');
   return {};
 }
 
@@ -1099,7 +1080,7 @@ async function fetchInstitutional() {
   // 再從 localStorage 讀
   try {
     const saved = JSON.parse(localStorage.getItem('inst_cache')||'{}');
-    if (saved.date === today && Object.keys(saved.data||{}).length > 50) {
+    if (saved.date === today && Object.keys(saved.data||{}).length > 0) {
       instCache = saved;
       addLog('info','三大法人讀取本地快取（'+Object.keys(saved.data).length+' 筆）');
       return saved.data;
@@ -1108,8 +1089,7 @@ async function fetchInstitutional() {
 
   addLog('info','抓取三大法人（'+today+'）…');
   const [twse, tpex] = await Promise.all([fetchTWSEInst(today), fetchTPExInst(today)]);
-  // ★ 合併時 TWSE 優先：避免 TPEx 同代號覆蓋 TWSE 資料
-  const merged = {...tpex, ...twse};
+  const merged = {...twse, ...tpex};
   if (Object.keys(merged).length > 0) {
     instCache = {date: today, data: merged};
     try { localStorage.setItem('inst_cache', JSON.stringify(instCache)); } catch(e) {}
@@ -1453,8 +1433,8 @@ async function fetchAllPrices() {
   renderTable();
   // 背景計算技術指標（不阻塞主流程）
   computeAllTechSignals().catch(()=>{});
-  // 補抓沒有 SPARK 資料的個股歷史走勢
-  // ★ 延遲3秒讓 computeAllTechSignals 先跑，避免重複抓取
+  // 補抓沒有 SPARK 資料的個股歷史走勢（新增個股首次抓取）
+  // ★ 延遲3秒讓 computeAllTechSignals 先跑完，再補抓仍缺 SPARK 的個股
   setTimeout(async () => {
     const noSpark = [...holdStocks,...watchStocks].filter(s => !SPARK[s.code] || SPARK[s.code].length < 3);
     if (noSpark.length === 0) return;
@@ -1475,6 +1455,8 @@ async function fetchAllPrices() {
           SPARK[s.code] = rows.slice(-5).map(r=>r.close).filter(v=>v>0);
           addLog('ok', `✓ SPARK ${s.code}: ${SPARK[s.code].length}筆`);
           renderTable();
+        } else {
+          await fetchTWSEClose(s.code); // 上市備援
         }
       } catch(e) { addLog('warn', `SPARK補抓 ${s.code}: ${e.message}`); }
       await new Promise(r=>setTimeout(r,800));
@@ -1629,8 +1611,6 @@ async function fetchMonthlyOHLCV(stockNo, isOTC, yyyymmdd) {
   const proxies = [
     url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
     url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-    url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-    url => `https://thingproxy.freeboard.io/fetch/${url}`,
   ];
   const toF = s => parseFloat((s||'0').toString().replace(/,/g,'')) || 0;
 
@@ -1663,7 +1643,7 @@ async function fetchMonthlyOHLCV(stockNo, isOTC, yyyymmdd) {
   const mmStr  = String(twDate.getMonth()+1).padStart(2,'0');
   const dateRoc = `${rocY}/${mmStr}/01`;
 
-  // ★ 若有 Vercel Proxy，優先透過它抓 TPEx 月線（server端無CORS限制）
+  // ★ 優先透過 Vercel Proxy 抓 TPEx 月線（server端無CORS限制）
   if (VERCEL_PROXY_URL) {
     try {
       const vUrl = `${VERCEL_PROXY_URL}/api/tpex?type=monthly&date=${encodeURIComponent(dateRoc)}&stockno=${stockNo}`;
@@ -1684,7 +1664,7 @@ async function fetchMonthlyOHLCV(stockNo, isOTC, yyyymmdd) {
           }
         }
       }
-    } catch(e) { /* fallback to proxy */ }
+    } catch(e) { /* 失敗繼續用 CORS proxy */ }
   }
 
   const tpexUrls = [
@@ -1842,7 +1822,7 @@ async function fetchTechIndicators(code) {
   const results = await Promise.all(months.map(m => fetchMonthlyOHLCV(no, isOTC, m)));
   const all = results.flat().sort((a,b) => a.date.localeCompare(b.date));
 
-  if (all.length < 10) return null;  // 資料不足（放寬至10筆）
+  if (all.length < (isOTC ? 10 : 20)) return null;  // 上櫃放寬至10筆（月線筆數較少）
 
   const closes = all.map(d=>d.close);
   const highs  = all.map(d=>d.high);
@@ -2123,8 +2103,8 @@ function renderTable() {
     const isOtcStock = stock.code.endsWith('.TWO') || stock.market === 'otc';
     const instCell = inst !== null
       ? '<div style="text-align:center;font-family:var(--mono);font-size:13px;font-weight:600;color:'+(inst>0?'var(--up)':inst<0?'var(--dn)':'var(--text2)')+'">'+(inst>0?'+':'')+fmt(inst)+'<br><span style="font-size:9px;color:var(--text3)">'+(inst>0?'買超':'賣超')+(instSrc?'・'+instSrc:'')+'</span></div>'
-      : isOtcStock
-        ? '<div style="text-align:center;color:#3d5570;font-size:10px;line-height:1.4" title="上櫃股三大法人數據因CORS限制無法取得">上櫃<br><span style="font-size:9px">無法取得</span></div>'
+      : isOtcStock && !VERCEL_PROXY_URL
+        ? '<div style="text-align:center;color:#3d5570;font-size:10px;line-height:1.4" title="上櫃股法人需設定Vercel Proxy">上櫃<br><span style="font-size:9px">需Proxy</span></div>'
         : '<div style="text-align:center;color:var(--text3);font-size:11px">—<br><span style="font-size:9px">↻抓取後顯示</span></div>';
 
     const chgCell = (pd && chg !== null && pct !== null)
@@ -2225,17 +2205,16 @@ function renderTable() {
 // ── DETAIL MODAL ─────────────────────────────────────────
 function selStk(code) {
   showDetail(code);
-  // ★ 若無技術訊號，自動背景抓取並更新 modal
+  // ★ 若無技術訊號，背景自動補抓並更新 modal
   if (!SIGS[code] || SIGS[code].length === 0) {
     fetchTechIndicators(code).then(ind => {
       if (!ind) return;
       techCache[code] = ind;
       SIGS[code] = buildSigTags(code, ind);
       if (ind.closes?.length >= 2) SPARK[code] = ind.closes.slice(-5);
-      // 更新已開啟的 modal 中的技術訊號區塊
       const sigDiv = document.getElementById(`det-sigs-${code}`);
       if (sigDiv) sigDiv.innerHTML = pillsAllHTML(code);
-      renderTable(); // 更新主表格 SPARK
+      renderTable();
     }).catch(() => {});
   }
 }
@@ -2369,7 +2348,7 @@ async function computeAllTechSignals() {
       const ind = await fetchTechIndicators(stock.code);
       if (ind) {
         SIGS[stock.code] = buildSigTags(stock.code, ind);
-        // ★ 同步更新 SPARK：取最近5筆真實收盤（覆蓋硬編碼模擬值，含新增個股）
+        // ★ 同步更新 SPARK 為真實近5日收盤
         if (ind.closes && ind.closes.length >= 2) {
           SPARK[stock.code] = ind.closes.slice(-5);
         }
@@ -2533,23 +2512,14 @@ function updateKeyIndicator() {
 async function runAI(code, name, sector) {
   const stock = [...holdStocks, ...watchStocks].find(s => s.code === code);
   const pd    = priceData[code];
-  // ★ 若無技術指標快取，AI分析前先自動抓取（確保prompt數據完整）
-  if (!techCache[code]) {
-    addLog('info', `[AI] 預載 ${code} 技術指標…`);
-    try {
-      const ind = await fetchTechIndicators(code);
-      if (ind) { techCache[code]=ind; SIGS[code]=buildSigTags(code,ind); if(ind.closes?.length>=2) SPARK[code]=ind.closes.slice(-5); }
-    } catch(e) {}
-  }
   const sc    = calcScore(stock, pd);
   const fin2 = FINS[code] || {};
   const modeStr   = currentMode === 'before' ? '盤前' : '盤後';
   const modeColor = currentMode === 'before' ? '#00c9e8' : '#00e676';
   const instRaw3_pre = getInstData(code);
-  const _isOtcCode = code.endsWith('.TWO');
   const instStr_pre  = instRaw3_pre
     ? `外資${instRaw3_pre.f>=0?'+':''}${instRaw3_pre.f}張，投信${instRaw3_pre.i>=0?'+':''}${instRaw3_pre.i}張，自營${instRaw3_pre.d>=0?'+':''}${instRaw3_pre.d}張，三大合計${instRaw3_pre.net>=0?'+':''}${instRaw3_pre.net}張`
-    : _isOtcCode ? '上櫃股法人數據因瀏覽器CORS限制無法直接取得，請根據該股產業類別與近期盤面特性進行籌碼方向判斷' : '尚未取得（請先執行抓取報價）';
+    : '尚未取得（請先執行抓取報價）';
   const techDetail_pre = (()=>{
     const c=techCache[code];
     if(!c) return '尚未取得（請先執行抓取報價）';
@@ -2561,8 +2531,30 @@ async function runAI(code, name, sector) {
     return parts.join('；') || '計算中';
   })();
   const modeInstr = currentMode === 'before'
-    ? `請依序輸出以下5個段落，每段以【標題】開頭（不可更改標題文字），正文80-130字，段落間空一行，5段缺一不可：\n\n【技術形態與開盤預判】昨收${pd?.prev??'—'}元，技術指標：${techDetail_pre}。判斷今日開盤偏多/偏空/中性，給出具體支撐壓力價位數字。\n\n【總體經濟影響】產業：${sector||stock?.sector||'不明'}。分析美股走勢、台幣匯率、聯準會利率政策對此產業的具體影響，明確結論「利多」或「利空」。\n\n【法人籌碼方向】法人數據：${instStr_pre}。分析外資/投信/自營商各自方向，給出「籌碼偏多」或「籌碼偏空」明確結論。\n\n【操作建議】明確給出「買進」「持有」「觀察」「減碼」其中一個，含建議進場/出場價位。\n\n【主要風險】列出3個具體下行風險點（技術面、基本面、總經面各一），每點勿超過25字。`
-    : `請依序輸出以下6個段落，每段以【標題】開頭（不可更改標題文字），正文80-130字，段落間空一行，6段缺一不可：\n\n【今日量價複盤】收盤${pd?.price??'—'}元，成交${pd?fmt(pd.vol,0)+'張':'—'}，區間${pd?pd.low+'～'+pd.high:'—'}元。分析量價走勢強弱含意，判斷多空力道。\n\n【技術指標現況】指標：${techDetail_pre}。依序分析MACD多空排列/金叉死叉、KD超買超賣/交叉、RSI區間操作提示、布林通道位置，最後給出「技術面偏多/偏空/中性」明確結論。\n\n【法人買賣超解讀】法人數據：${instStr_pre}。解讀外資/投信/自營商各自方向與三大法人合計對後市的影響，給出「籌碼偏多/偏空」結論。\n\n【財務數據評估】EPS去年${fin2.eps_ly??'—'}元/今年累積${fin2.eps_ytd??'—'}元，毛利率${fin2.gm??'—'}%，營收YOY ${fin2.rev_yoy??'—'}%。評估基本面是否支撐現價，給出「基本面強/中/弱」明確結論。\n\n【明日操作策略】明確給出「買進」「持有」「觀察」「減碼」其中一個，含具體進場價位區間與停損點設定。\n\n【評分說明】本次評分${sc.score}/100，具體說明加分項目（技術/籌碼/基本面）與扣分原因，讓投資人理解評分依據。`;
+    ? `請依序輸出以下5個段落，每段以【標題】開頭，每段50-100字，不可省略任何段落：
+
+【技術形態與開盤預判】請根據以下數據分析：昨收${pd?.prev??'—'}元，技術指標：${techDetail_pre}。判斷今日開盤偏多/偏空/中性，說明關鍵支撐與壓力位。
+
+【總體經濟影響】產業為${sector||stock?.sector||'不明'}。說明當前美股、匯率、利率環境對此產業的具體影響，給出利多或利空明確結論。
+
+【法人籌碼方向】法人數據：${instStr_pre}。依據以上數值分析外資、投信、自營商各自方向，判斷整體籌碼偏多或偏空。
+
+【操作建議】綜合技術面與籌碼面，明確給出買進/持有/觀察/賣出其中一個，說明建議價位與理由。
+
+【主要風險】列出2-3個具體下行風險點。`
+    : `請依序輸出以下6個段落，每段以【標題】開頭，每段50-100字，不可省略任何段落：
+
+【今日量價複盤】今日數據：收盤${pd?.price??'—'}元，成交量${pd?fmt(pd.vol,0)+'張':'—'}，區間${pd?pd.low+'～'+pd.high:'—'}元。分析量價走勢含意，說明多空力道強弱。
+
+【技術指標現況】指標數據：${techDetail_pre}。依序分析MACD多空排列與金叉死叉、KD超買超賣與交叉訊號、RSI數值區間操作提示、布林通道股價位置與帶寬狀態，最後給出技術面偏多/偏空/中性的最佳決策建議。
+
+【法人買賣超解讀】法人數據：${instStr_pre}。分析外資、投信、自營商各自買賣方向，解讀三大法人合計張數對後市的影響與含意。
+
+【財務數據評估】財務數據：EPS去年${fin2.eps_ly??'—'}元/今年累積${fin2.eps_ytd??'—'}元，毛利率${fin2.gm??'—'}%，營收YOY ${fin2.rev_yoy??'—'}%。評估基本面強弱，給出財務面結論。
+
+【明日操作策略】明確給出買進/持有/觀察/賣出其中一個，含建議進場價位與停損點。
+
+【評分說明】本次評分${sc.score}/100，說明主要加分或扣分原因。`;
 
   const instRaw3  = getInstData(code);
   const instStr   = instRaw3 ? `三大法人合計${instRaw3.net>=0?'+':''}${instRaw3.net}張（外資${instRaw3.f>=0?'+':''}${instRaw3.f}，投信${instRaw3.i>=0?'+':''}${instRaw3.i}，自營${instRaw3.d>=0?'+':''}${instRaw3.d}）` : '尚未取得';
@@ -2647,9 +2639,9 @@ ${modeInstr}
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        system_instruction: {parts: [{text: '你是專業台股分析師。【強制輸出規則】：①全程繁體中文。②prompt要求幾個【標題】段落，必須全部輸出，一段都不能少，違者視為輸出失敗。③每段標題格式：【標題】，正文緊接其後，段落間空一行，每段80-130字。④數據欄位顯示「—」或「CORS限制」時，請根據股票代號、產業特性、近期市場環境進行合理推測分析，禁止輸出「資料不足」「無法分析」等推卸字眼，必須給出具體見解。'}]},
+        system_instruction: {parts: [{text: '你是專業台股分析師。規則：①全程繁體中文。②每個【標題】段落都必須輸出，每段50-100字，總字數400-600字。③嚴禁省略任何段落，否則視為失敗。④輸出格式：每個段落以【標題】開頭，內容緊接在後，段落間空一行。'}]},
         contents: [{parts: [{text: prompt}]}],
-        generationConfig: {maxOutputTokens: 4000, temperature: 0.4}
+        generationConfig: {maxOutputTokens: 3000, temperature: 0.4}
       })
     });
     if (!r.ok) {
