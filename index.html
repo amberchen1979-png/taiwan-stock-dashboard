@@ -968,31 +968,42 @@ async function fetchWithRetry(url, options={}, maxRetry=3, delay=2000) {
 }
 
 async function fetchTWSEInst(dateStr) {
-  // ★ 方案A：Vercel Proxy（優先，server端無CORS限制）
+  // ★ 方案A：Vercel Proxy（優先，server端無CORS限制）— 最多重試2次
   if (VERCEL_PROXY_URL) {
-    try {
-      const vUrl = `${VERCEL_PROXY_URL}/api/twse?type=t86&date=${dateStr}`;
-      const r = await fetch(vUrl, {signal: AbortSignal.timeout(25000)});  // T86資料量大，給25秒
-      if (r.ok) {
-        const j = await r.json();
-        if (j?.stat === 'OK' && j?.data?.length > 0) {
-          const result = {};
-          j.data.forEach(row => {
-            const no  = (row[0]||'').trim();
-            const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
-            const f   = toZ(row[4]);
-            const i   = toZ(row[10]);
-            const d2  = toZ(row[17]);
-            const net = toZ(row[18]);
-            if (no) result[no] = {f, i, d:d2, net, src:'twse'};
-          });
-          if (Object.keys(result).length > 0) {
-            addLog('ok', `✓ TWSE三大法人（Vercel）：${Object.keys(result).length}筆`);
-            return result;
+    const _t86Timeouts = [30000, 35000];
+    for (let _attempt = 0; _attempt < _t86Timeouts.length; _attempt++) {
+      try {
+        if (_attempt > 0) {
+          addLog('warn', `Vercel T86 第${_attempt}次失敗，2秒後重試（timeout=${_t86Timeouts[_attempt]}ms）…`);
+          await new Promise(r => setTimeout(r, 2000));
+        }
+        const vUrl = `${VERCEL_PROXY_URL}/api/twse?type=t86&date=${dateStr}`;
+        const r = await fetch(vUrl, {signal: AbortSignal.timeout(_t86Timeouts[_attempt])});
+        if (r.ok) {
+          const j = await r.json();
+          if (j?.stat === 'OK' && j?.data?.length > 0) {
+            const result = {};
+            j.data.forEach(row => {
+              const no  = (row[0]||'').trim();
+              const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
+              const f   = toZ(row[4]);
+              const i   = toZ(row[10]);
+              const d2  = toZ(row[17]);
+              const net = toZ(row[18]);
+              if (no) result[no] = {f, i, d:d2, net, src:'twse'};
+            });
+            if (Object.keys(result).length > 0) {
+              addLog('ok', `✓ TWSE三大法人（Vercel）：${Object.keys(result).length}筆`);
+              return result;
+            }
           }
         }
+      } catch(e) {
+        if (_attempt >= _t86Timeouts.length - 1) {
+          addLog('warn', `Vercel TWSE T86 全部重試失敗(${e.message})，改用Proxy…`);
+        }
       }
-    } catch(e) { addLog('warn', `Vercel TWSE T86失敗: ${e.message}（timeout=${e.name}），改用Proxy…`); }
+    }
   }
 
   // ★ 方案B：CORS Proxy 備援
@@ -1611,7 +1622,7 @@ function sparkHTML(code) {
     </defs>
     <polygon points="${area}" fill="url(#sg${code.replace(/[^a-z0-9]/gi,'')})" />
     <polyline points="${polyline}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="${lx}" cy="${ly}" r="2.5" fill="${color}"/>
+    ${pts.map((p,i)=>{const[px,py]=p.split(',');const isLast=i===pts.length-1;return `<circle cx="${px}" cy="${py}" r="${isLast?2.8:1.8}" fill="${isLast?color:'var(--bg3)'}" stroke="${color}" stroke-width="${isLast?0:1.2}" opacity="${isLast?1:.9}"><title>${d[i]?.toFixed?.(2)??d[i]}</title></circle>`;}).join('')}
   </svg>`;
 }
 
@@ -1706,11 +1717,12 @@ async function fetchMonthlyOHLCV(stockNo, isOTC, yyyymmdd) {
         const j = await r.json();
         const rows = j.aaData || [];
         if (rows.length > 0) {
+          // TPEx exchange aaData 正確欄位：[0]日期 [1]量(股) [3]開 [4]高 [5]低 [6]收
           const parsed = rows.map(row => ({
             date:  String(row[0]||''),
-            open:  toF(row[8]), high: toF(row[9]),
-            low:   toF(row[10]), close: toF(row[3]),
-            vol:   Math.round(toF(row[6])),
+            open:  toF(row[3]), high: toF(row[4]),
+            low:   toF(row[5]), close: toF(row[6]),
+            vol:   Math.round(toF(row[1])/1000),
           })).filter(d => d.close > 0);
           if (parsed.length > 0) {
             addLog('ok', `TPEx月線(Vercel) ${stockNo} ${dateRoc}: ${parsed.length}筆`);
@@ -1736,14 +1748,16 @@ async function fetchMonthlyOHLCV(stockNo, isOTC, yyyymmdd) {
         if (!rows.length) continue;
         // exchange端點：[0]日期 [3]收 [8]開 [9]高 [10]低 [6]量
         // result端點：  [0]日期 [2]收 [4]開 [5]高 [6]低 [7]量
+        // exchange端點正確欄位：[0]日期 [1]量(股) [3]開 [4]高 [5]低 [6]收
+        // result端點欄位：    [0]日期 [7]量(千) [4]開 [5]高 [6]低 [2]收
         const isExchange = base.includes('exchange');
         const parsed = rows.map(row => ({
           date:  String(row[0]||''),
-          open:  toF(isExchange ? row[8]  : row[4]),
-          high:  toF(isExchange ? row[9]  : row[5]),
-          low:   toF(isExchange ? row[10] : row[6]),
-          close: toF(isExchange ? row[3]  : row[2]),
-          vol:   Math.round(toF(isExchange ? row[6] : row[7])),
+          open:  toF(isExchange ? row[3] : row[4]),
+          high:  toF(isExchange ? row[4] : row[5]),
+          low:   toF(isExchange ? row[5] : row[6]),
+          close: toF(isExchange ? row[6] : row[2]),
+          vol:   Math.round(toF(isExchange ? row[1] : row[7]) / (isExchange ? 1000 : 1)),
         })).filter(d => d.close > 0);
         if (parsed.length > 0) {
           addLog('ok', `TPEx月線 ${stockNo} ${dateRoc}: ${parsed.length}筆`);
@@ -1752,7 +1766,60 @@ async function fetchMonthlyOHLCV(stockNo, isOTC, yyyymmdd) {
       } catch(e) { addLog('warn', `TPEx月線 ${stockNo} ${base.includes('exchange')?'exchange':'result'} 失敗: ${e.message}`); }
     }
   }
-  addLog('warn', `TPEx月線 ${stockNo} ${dateRoc} 所有端點失敗`);
+  addLog('warn', `TPEx月線 ${stockNo} ${dateRoc} 所有端點失敗，嘗試 Yahoo Finance fallback…`);
+
+  // ── Yahoo Finance fallback：OTC月線（上櫃 TPEx 端點全失效時備援）──
+  // 時區：Yahoo 回傳 Unix 秒(UTC)，加 28800 秒轉台灣 UTC+8 再取 UTC 日期欄位
+  try {
+    const _yhUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${stockNo}.TWO?interval=1d&range=4mo`;
+    const _reqY  = parseInt(yyyymmdd.slice(0, 4));   // 西元年
+    const _reqM  = parseInt(yyyymmdd.slice(4, 6));   // 月份
+    const _yhPx  = [
+      `https://corsproxy.io/?${encodeURIComponent(_yhUrl)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(_yhUrl)}`,
+      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(_yhUrl)}`,
+    ];
+    for (const _px of _yhPx) {
+      try {
+        const _r = await fetch(_px, {signal: AbortSignal.timeout(10000)});
+        if (!_r.ok) continue;
+        const _j = await _r.json();
+        const _res = _j?.chart?.result?.[0];
+        if (!_res?.timestamp?.length) continue;
+        const _q  = _res.indicators?.quote?.[0] || {};
+        const _op = _q.open   || [];
+        const _hi = _q.high   || [];
+        const _lo = _q.low    || [];
+        const _cl = _q.close  || [];
+        const _vo = _q.volume || [];
+        const _parsed = _res.timestamp.map((_t, _i) => {
+          // Unix秒 + 8hr offset → 台灣本地日期（UTC欄位即為本地日期）
+          const _tw = new Date((_t + 28800) * 1000);
+          const _y  = _tw.getUTCFullYear();
+          const _mo = _tw.getUTCMonth() + 1;
+          const _dy = _tw.getUTCDate();
+          // 只保留請求月份的資料
+          if (_y !== _reqY || _mo !== _reqM) return null;
+          if (!_cl[_i] || _cl[_i] <= 0) return null;
+          const _c = +_cl[_i].toFixed(2);
+          return {
+            date:  `${_y}-${String(_mo).padStart(2,'0')}-${String(_dy).padStart(2,'0')}`,
+            open:  +(_op[_i] != null ? _op[_i].toFixed(2) : _c),
+            high:  +(_hi[_i] != null ? _hi[_i].toFixed(2) : _c),
+            low:   +(_lo[_i] != null ? _lo[_i].toFixed(2) : _c),
+            close: _c,
+            vol:   Math.round((_vo[_i] || 0) / 1000),
+          };
+        }).filter(Boolean);
+        if (_parsed.length > 0) {
+          addLog('ok', `TPEx[Yahoo↑] ${stockNo} ${_reqY}/${String(_reqM).padStart(2,'0')}: ${_parsed.length}筆`);
+          return _parsed;
+        }
+      } catch(_e) { /* 換下一個 proxy */ }
+    }
+  } catch(_e) {}
+
+  addLog('warn', `TPEx月線 ${stockNo} Yahoo fallback 亦失敗`);
   return [];
 }
 
@@ -2686,16 +2753,51 @@ ${modeInstr}
   }
 
   try {
+    // ── 自動補齊技術指標與法人資料（確保資料完整再送 Gemini）──
+    if (!techCache[code]) {
+      body.innerHTML = `<div style="text-align:center;padding:20px;color:#8aa8c8;font-size:13px">⟳ 補抓技術指標中，請稍候…</div>`;
+      const _ind = await fetchTechIndicators(code).catch(()=>null);
+      if (_ind) { techCache[code]=_ind; SIGS[code]=buildSigTags(code,_ind); if(_ind.closes?.length>=2) SPARK[code]=_ind.closes.slice(-5); }
+    }
+    const _cno = code.replace('.TWO','').replace('.TW','');
+    if (!instCache.data?.[_cno]) {
+      body.innerHTML = `<div style="text-align:center;padding:20px;color:#8aa8c8;font-size:13px">⟳ 補抓三大法人資料中，請稍候…</div>`;
+      await fetchInstitutional().catch(()=>{});
+    }
+    body.innerHTML = `<div style="text-align:center;padding:20px;color:#8aa8c8;font-size:13px"><div class="dots"><span></span><span></span><span></span></div>&nbsp; Gemini AI 分析中（資料已補齊）…</div>`;
+
+    // ── 用最新資料重建技術指標字串 ──
+    const _ftd = (()=>{
+      const c=techCache[code]; if(!c) return '尚未取得';
+      const{macd,kd,rsi,bb}=c; const p=[];
+      if(macd) p.push(`MACD：DIF=${macd.dif} DEA=${macd.dea} 柱=${macd.bar}，${macd.dif>macd.dea?'多頭排列':'空頭排列'}${macd.cross?'，'+macd.cross:''}`);
+      if(kd)   p.push(`KD：K值=${kd.k} D值=${kd.d}，${kd.zone}${kd.cross?'，'+kd.cross:''}`);
+      if(rsi)  p.push(`RSI=${rsi.value}，${rsi.zone}，${rsi.signal}`);
+      if(bb)   p.push(`布林：%B=${bb.pb}%，${bb.pos}，${bb.squeeze}`);
+      return p.join('；') || '計算中';
+    })();
+    // ── 用最新資料重建法人字串 ──
+    const _fid = getInstData(code);
+    const _fis = _fid
+      ? `外資${_fid.f>=0?'+':''}${_fid.f}張、投信${_fid.i>=0?'+':''}${_fid.i}張、自營${_fid.d>=0?'+':''}${_fid.d}張、三大合計${_fid.net>=0?'+':''}${_fid.net}張`
+      : '今日資料尚未公布（非交易時段或假日）';
+    // ── 依盤前/盤後重建指令段落 ──
+    const _fmi = currentMode==='before'
+      ? `請依序輸出以下5個段落，每段以【標題】開頭，每段60-120字，禁止省略任何段落：\n\n【技術形態與開盤預判】昨收${pd?.prev??'—'}元，技術指標：${_ftd}。判斷今日開盤偏多/偏空/中性，標明關鍵支撐與壓力位（精確價格）。\n\n【總體經濟影響】產業：${sector||stock?.sector||'不明'}。說明當前美股走勢、台幣匯率、外資期貨方向對本產業的具體影響，給出明確利多或利空結論。\n\n【法人籌碼方向】法人數據：${_fis}。分析外資、投信、自營商各自方向，判斷籌碼整體偏多或偏空，給出明確結論。\n\n【操作建議】明確給出「買進/持有/觀察/賣出」其中一個，含建議進場價位與停損點，理由具體。\n\n【主要風險】列出2-3個具體下行風險，每點含可能觸發的關鍵價位。`
+      : `請依序輸出以下6個段落，每段以【標題】開頭，每段60-120字，禁止省略任何段落：\n\n【今日量價複盤】收盤${pd?.price??'—'}元，成交量${pd?fmt(pd.vol,0)+'張':'—'}，今日區間${pd?pd.low+'～'+pd.high:'—'}元。分析量價關係含意，比較近日多空力道強弱。\n\n【技術指標現況】指標數據：${_ftd}。依序分析MACD多空排列與交叉訊號、KD超買超賣與交叉、RSI位置操作提示、布林通道位置，最後給出技術面偏多/偏空/中性結論。\n\n【法人買賣超解讀】法人數據：${_fis}。分析外資、投信、自營商方向含意，解讀三大法人合計對後市影響，給出明確結論。\n\n【財務數據評估】EPS去年${fin2.eps_ly??'—'}元/今年累積${fin2.eps_ytd??'—'}元，毛利率${fin2.gm??'—'}%，營收YOY ${fin2.rev_yoy??'—'}%。若有「—」請依產業慣例推估並標注【推估】，給出基本面強弱結論。\n\n【明日操作策略】明確給出「買進/持有/觀察/賣出」其中一個，含建議進場價位與停損點，說明具體條件。\n\n【評分說明】本次評分${sc.score}/100，列出3-5條具體加分或扣分原因。`;
+    // ── 最終 prompt（使用最新資料）──
+    const _fp = `以下是台股個股資料，請依指令輸出專業投資報告。\n\n【個股資訊】\n代號：${code.replace('.TWO','').replace('.TW','')} ${name}　產業：${sector||stock?.sector||'不明'}\n現價：${pd?.price??'不明'} 元　昨收：${pd?.prev??'不明'} 元\n漲跌：${pd?(pd.chg!=null?(pd.chg>=0?'+':'')+pd.chg+'元 ('+(pd.pct!=null?pd.pct.toFixed(2):'?')+'%)':'—'):'不明'}\n今日區間：${pd?pd.low+'～'+pd.high:'不明'}　成交量：${pd?fmt(pd.vol,0)+'張':'不明'}\n技術訊號：${(SIGS[code]||[]).join('、')||'無'}\n技術指標詳情：${_ftd}\n法人：${_fis}\nEPS(去年/今年累積)：${fin2.eps_ly??'—'} / ${fin2.eps_ytd??'—'}　毛利率：${fin2.gm??'—'}%　營收YOY：${fin2.rev_yoy??'—'}%\n資料來源：${priceData[code]?.src==='twse-mis'?'TWSE即時':priceData[code]?.src==='twse'?'TWSE收盤':priceData[code]?.src==='yahoo'?'Yahoo Finance':'模擬資料'}\n\n${_fmi}`;
+
     const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
-    addLog('info', 'Gemini AI 分析中…');
+    addLog('info', 'Gemini AI 分析中（資料已補齊）…');
     addGeminiCall(1);  // 計費：AI 智能分析
     const r = await fetch(GEMINI_URL, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        system_instruction: {parts: [{text: '你是專業台股分析師。規則：①全程繁體中文。②每個【標題】段落都必須輸出，每段50-100字，總字數400-600字。③嚴禁省略任何段落，否則視為失敗。④輸出格式：每個段落以【標題】開頭，內容緊接在後，段落間空一行。'}]},
-        contents: [{parts: [{text: prompt}]}],
-        generationConfig: {maxOutputTokens: 3000, temperature: 0.4}
+        system_instruction: {parts: [{text: '你是頂級台股量化分析師，擁有20年實戰操盤經驗。核心規定（違反任何一條視為完全失敗）：①全程繁體中文；②嚴格依照指令中每個【標題】段落順序輸出，一個都不得省略；③每段必須包含具體數字與明確方向（多/空/中性），禁止使用「需持續觀察」「視情況而定」等模糊語句；④若某資料標示「—」，必須基於其他已知數據進行專業推估並標注【推估】；⑤每段60-120字，總字數600-850字；⑥每個操作建議須包含明確的進場價位與停損價位，供投資人直接參考執行。'}]},
+        contents: [{parts: [{text: _fp}]}],
+        generationConfig: {maxOutputTokens: 4500, temperature: 0.3}
       })
     });
     if (!r.ok) {
