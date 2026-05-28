@@ -944,9 +944,6 @@ async function fetchTWSEClose(code) {
 // ══════════════════════════════════════════════════════════
 let instCache = {};
 
-// ★ Vercel Proxy 設定（全域變數，部署後填入你的網址）
-const VERCEL_PROXY_URL = 'https://taiwan-stock-proxy.vercel.app';
-
 function getTodayDateStr() {
   const d = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
   return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
@@ -1004,39 +1001,7 @@ async function fetchTPExInst(dateStr) {
   // 民國年轉換：yyyymmdd → yyy/mm/dd
   const year = parseInt(dateStr.slice(0,4)) - 1911;
   const tpDate = year+'/'+dateStr.slice(4,6)+'/'+dateStr.slice(6,8);
-
-  // ★ 方案A：Vercel Proxy（優先，server端無CORS限制）
-  if (VERCEL_PROXY_URL) {
-    try {
-      const vUrl = `${VERCEL_PROXY_URL}/api/tpex?date=${encodeURIComponent(tpDate)}`;
-      const r = await fetch(vUrl, {signal: AbortSignal.timeout(12000)});
-      if (r.ok) {
-        const j = await r.json();
-        const rows = j.tables?.[0]?.data || j.aaData || [];
-        if (rows.length > 0) {
-          const result = {};
-          const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
-          rows.forEach(row => {
-            const no = (row[0]||'').trim();
-            if (!no || no.length < 4) return;
-            result[no] = {
-              f:   toZ(row[4]),
-              i:   toZ(row[7]),
-              d:   toZ(row[13]),
-              net: toZ(row[23]),
-              src: 'tpex'
-            };
-          });
-          if (Object.keys(result).length > 0) {
-            addLog('ok', `✓ TPEx三大法人（Vercel）：${Object.keys(result).length}筆`);
-            return result;
-          }
-        }
-      }
-    } catch(e) { addLog('warn', `Vercel TPEx失敗: ${e.message}，改用Proxy…`); }
-  }
-
-  // ★ 方案B：CORS Proxy 備援（原本邏輯保留）
+  // allorigins 對此 endpoint 可通（se=EW 為上櫃一般股）
   const url = 'https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&d='+tpDate+'&se=EW&s=0,asc&o=json';
   const proxies = [
     'https://corsproxy.io/?'+encodeURIComponent(url),
@@ -1434,35 +1399,18 @@ async function fetchAllPrices() {
   // 背景計算技術指標（不阻塞主流程）
   computeAllTechSignals().catch(()=>{});
   // 補抓沒有 SPARK 資料的個股歷史走勢（新增個股首次抓取）
-  // ★ 延遲3秒讓 computeAllTechSignals 先跑完，再補抓仍缺 SPARK 的個股
-  setTimeout(async () => {
-    const noSpark = [...holdStocks,...watchStocks].filter(s => !SPARK[s.code] || SPARK[s.code].length < 3);
-    if (noSpark.length === 0) return;
-    addLog('info', `補抓 ${noSpark.length} 檔歷史走勢（含上櫃）…`);
-    for (const s of noSpark) {
-      try {
-        const no = s.code.replace('.TWO','').replace('.TW','');
-        const isOTC = s.code.endsWith('.TWO');
-        const tw = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
-        const yyyymmdd = tw.getFullYear()+String(tw.getMonth()+1).padStart(2,'0')+'01';
-        let rows = await fetchMonthlyOHLCV(no, isOTC, yyyymmdd);
-        if (!rows || rows.length < 3) {
-          const d2 = new Date(tw); d2.setMonth(d2.getMonth()-1);
-          const ym2 = d2.getFullYear()+String(d2.getMonth()+1).padStart(2,'0')+'01';
-          rows = await fetchMonthlyOHLCV(no, isOTC, ym2);
-        }
-        if (rows && rows.length >= 2) {
-          SPARK[s.code] = rows.slice(-5).map(r=>r.close).filter(v=>v>0);
-          addLog('ok', `✓ SPARK ${s.code}: ${SPARK[s.code].length}筆`);
-          renderTable();
-        } else {
-          await fetchTWSEClose(s.code); // 上市備援
-        }
-      } catch(e) { addLog('warn', `SPARK補抓 ${s.code}: ${e.message}`); }
-      await new Promise(r=>setTimeout(r,800));
-    }
-    addLog('ok','歷史走勢補抓完成');
-  }, 3000);
+  const noSpark = all.filter(s => !SPARK[s.code] || SPARK[s.code].length < 3);
+  if (noSpark.length > 0) {
+    addLog('info', `補抓 ${noSpark.length} 檔歷史走勢…`);
+    (async () => {
+      for (const s of noSpark) {
+        await fetchTWSEClose(s.code);
+        await new Promise(r=>setTimeout(r,600));
+      }
+      renderTable();
+      addLog('ok','歷史走勢補抓完成');
+    })();
+  }
 }
 
 // ── LOG ──────────────────────────────────────────────────
@@ -1643,30 +1591,6 @@ async function fetchMonthlyOHLCV(stockNo, isOTC, yyyymmdd) {
   const mmStr  = String(twDate.getMonth()+1).padStart(2,'0');
   const dateRoc = `${rocY}/${mmStr}/01`;
 
-  // ★ 優先透過 Vercel Proxy 抓 TPEx 月線（server端無CORS限制）
-  if (VERCEL_PROXY_URL) {
-    try {
-      const vUrl = `${VERCEL_PROXY_URL}/api/tpex?type=monthly&date=${encodeURIComponent(dateRoc)}&stockno=${stockNo}`;
-      const r = await fetch(vUrl, {signal: AbortSignal.timeout(10000)});
-      if (r.ok) {
-        const j = await r.json();
-        const rows = j.aaData || [];
-        if (rows.length > 0) {
-          const parsed = rows.map(row => ({
-            date:  String(row[0]||''),
-            open:  toF(row[8]), high: toF(row[9]),
-            low:   toF(row[10]), close: toF(row[3]),
-            vol:   Math.round(toF(row[6])),
-          })).filter(d => d.close > 0);
-          if (parsed.length > 0) {
-            addLog('ok', `TPEx月線(Vercel) ${stockNo} ${dateRoc}: ${parsed.length}筆`);
-            return parsed;
-          }
-        }
-      }
-    } catch(e) { /* 失敗繼續用 CORS proxy */ }
-  }
-
   const tpexUrls = [
     `https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock/exchange?date=${dateRoc}&stockCode=${stockNo}&response=json`,
     `https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock/result?date=${dateRoc}&stockCode=${stockNo}&response=json`,
@@ -1822,7 +1746,7 @@ async function fetchTechIndicators(code) {
   const results = await Promise.all(months.map(m => fetchMonthlyOHLCV(no, isOTC, m)));
   const all = results.flat().sort((a,b) => a.date.localeCompare(b.date));
 
-  if (all.length < (isOTC ? 10 : 20)) return null;  // 上櫃放寬至10筆（月線筆數較少）
+  if (all.length < 20) return null;  // 資料不足
 
   const closes = all.map(d=>d.close);
   const highs  = all.map(d=>d.high);
@@ -2100,12 +2024,9 @@ function renderTable() {
     const instRaw = getInstData(stock.code);
     const inst    = instRaw?.net ?? null;
     const instSrc = instRaw?.isLive ? '今日' : instRaw?.savedDate ? instRaw.savedDate.slice(4,6)+'/'+instRaw.savedDate.slice(6,8) : null;
-    const isOtcStock = stock.code.endsWith('.TWO') || stock.market === 'otc';
     const instCell = inst !== null
       ? '<div style="text-align:center;font-family:var(--mono);font-size:13px;font-weight:600;color:'+(inst>0?'var(--up)':inst<0?'var(--dn)':'var(--text2)')+'">'+(inst>0?'+':'')+fmt(inst)+'<br><span style="font-size:9px;color:var(--text3)">'+(inst>0?'買超':'賣超')+(instSrc?'・'+instSrc:'')+'</span></div>'
-      : isOtcStock && !VERCEL_PROXY_URL
-        ? '<div style="text-align:center;color:#3d5570;font-size:10px;line-height:1.4" title="上櫃股法人需設定Vercel Proxy">上櫃<br><span style="font-size:9px">需Proxy</span></div>'
-        : '<div style="text-align:center;color:var(--text3);font-size:11px">—<br><span style="font-size:9px">↻抓取後顯示</span></div>';
+      : '<div style="text-align:center;color:var(--text3);font-size:11px">—<br><span style="font-size:9px">↻抓取後顯示</span></div>';
 
     const chgCell = (pd && chg !== null && pct !== null)
       ? `<div class="cv ${cls(pct)}">${chg >= 0 ? '+' : ''}${fmt(chg, 2)}<br>
@@ -2205,18 +2126,6 @@ function renderTable() {
 // ── DETAIL MODAL ─────────────────────────────────────────
 function selStk(code) {
   showDetail(code);
-  // ★ 若無技術訊號，背景自動補抓並更新 modal
-  if (!SIGS[code] || SIGS[code].length === 0) {
-    fetchTechIndicators(code).then(ind => {
-      if (!ind) return;
-      techCache[code] = ind;
-      SIGS[code] = buildSigTags(code, ind);
-      if (ind.closes?.length >= 2) SPARK[code] = ind.closes.slice(-5);
-      const sigDiv = document.getElementById(`det-sigs-${code}`);
-      if (sigDiv) sigDiv.innerHTML = pillsAllHTML(code);
-      renderTable();
-    }).catch(() => {});
-  }
 }
 
 function closeDetail() {
@@ -2298,11 +2207,7 @@ function showDetail(code) {
       </div>
       <div style="margin-bottom:12px">
         <div style="font-size:11px;color:var(--text2);font-weight:500;margin-bottom:6px">技術訊號</div>
-        <div class="spills" style="justify-content:flex-start" id="det-sigs-${code}">
-          ${(SIGS[code]||[]).length > 0
-            ? pillsAllHTML(code)
-            : '<span style="font-size:11px;color:var(--text3)">計算中，請稍候…</span>'}
-        </div>
+        <div class="spills" style="justify-content:flex-start">${pillsAllHTML(code)}</div>
       </div>
       <div class="ai-box">
         <div class="ai-hdr">
@@ -2348,10 +2253,6 @@ async function computeAllTechSignals() {
       const ind = await fetchTechIndicators(stock.code);
       if (ind) {
         SIGS[stock.code] = buildSigTags(stock.code, ind);
-        // ★ 同步更新 SPARK 為真實近5日收盤
-        if (ind.closes && ind.closes.length >= 2) {
-          SPARK[stock.code] = ind.closes.slice(-5);
-        }
         addLog('ok', `技術指標 ${stock.code}: ${SIGS[stock.code].join(' ')}`);
       }
     } catch(e) {}
