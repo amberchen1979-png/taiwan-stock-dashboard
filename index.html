@@ -1100,17 +1100,20 @@ async function fetchTPExInst(dateStr) {
 async function fetchInstitutional() {
   const today = getTodayDateStr();
   // 先從記憶體快取讀
-  if (instCache.date === today && Object.keys(instCache.data||{}).length > 0) {
+  if (instCache.date === today && Object.keys(instCache.data||{}).length > 200) {
     addLog('info','三大法人使用記憶體快取（'+Object.keys(instCache.data).length+' 筆）');
     return instCache.data;
   }
-  // 再從 localStorage 讀
+  // 再從 localStorage 讀（★ 筆數需>200才算完整，否則重抓以確保上櫃資料）
   try {
     const saved = JSON.parse(localStorage.getItem('inst_cache')||'{}');
-    if (saved.date === today && Object.keys(saved.data||{}).length > 0) {
+    if (saved.date === today && Object.keys(saved.data||{}).length > 200) {
       instCache = saved;
       addLog('info','三大法人讀取本地快取（'+Object.keys(saved.data).length+' 筆）');
       return saved.data;
+    } else if (saved.date === today) {
+      addLog('warn', `本地快取筆數不足（${Object.keys(saved.data||{}).length}筆），重新抓取…`);
+      localStorage.removeItem('inst_cache');
     }
   } catch(e) {}
 
@@ -3183,11 +3186,26 @@ function importSettings(event) {
 // ── INIT ──────────────────────────────────────────────────
 // ★ 版本號快取清除：若快取版本不符，自動清空inst_cache避免舊錯誤數字
 (function clearOldCache() {
-  const CACHE_VER = '28_3';
+  // ★ 版本更新時清除快取
+  const CACHE_VER = '28_5';
   if (localStorage.getItem('cache_ver') !== CACHE_VER) {
     localStorage.removeItem('inst_cache');
     localStorage.setItem('cache_ver', CACHE_VER);
     console.log('[INIT] 快取版本更新，已清除舊三大法人快取');
+  }
+  // ★ 每日自動清除：若快取日期不是今天，或筆數不足200（缺上櫃資料），立即清除
+  try {
+    const today = (function() {
+      const d = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
+      return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
+    })();
+    const saved = JSON.parse(localStorage.getItem('inst_cache')||'{}');
+    if (saved.date !== today || Object.keys(saved.data||{}).length < 200) {
+      localStorage.removeItem('inst_cache');
+      console.log('[INIT] 三大法人快取已清除（日期變更或資料不完整）');
+    }
+  } catch(e) {
+    localStorage.removeItem('inst_cache');
   }
 })();
 updateFinsDateLabel();
