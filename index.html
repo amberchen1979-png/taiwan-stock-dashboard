@@ -943,6 +943,7 @@ async function fetchTWSEClose(code) {
 // corsproxy.io 主力，失敗自動等待重試，確保穩定抓取
 // ══════════════════════════════════════════════════════════
 let instCache = {};
+let aiCache = {};  // AI 分析快取 {code_mode: {html, ts}}
 
 // ★ Vercel Proxy 設定（全域變數，部署後填入你的網址）
 const VERCEL_PROXY_URL = 'https://taiwan-stock-proxy.vercel.app';
@@ -1002,7 +1003,7 @@ function toRocDate(yyyymmdd) {
 // ★ TWSE T86：14:45 前傳前一交易日，14:45 後傳今日（空則 fallback 一次）
 async function fetchTWSEInst(dateStr) {
   const _tseCodes = [...holdStocks, ...watchStocks]
-    .filter(s => s.market === 'tse')
+    .filter(s => s.code.endsWith('.TW') && !s.code.endsWith('.TWO'))
     .map(s => s.code.replace(/\.(TW|TWO)$/i, ''))
     .filter(Boolean).join(',');
   const _codesParam = _tseCodes ? `&codes=${encodeURIComponent(_tseCodes)}` : '';
@@ -1067,7 +1068,7 @@ async function fetchTWSEInst(dateStr) {
 // ★ TPEx 需明確日期；14:45 前精準帶前一交易日，14:45 後帶今日（空則 fallback 一次）
 async function fetchTPExInst(dateStr) {
   const _otcCodes = [...holdStocks, ...watchStocks]
-    .filter(s => s.market === 'otc')
+    .filter(s => s.code.endsWith('.TWO'))
     .map(s => s.code.replace(/\.(TW|TWO)$/i, ''))
     .filter(Boolean).join(',');
   const _codesParam = _otcCodes ? `&codes=${encodeURIComponent(_otcCodes)}` : '';
@@ -1139,12 +1140,10 @@ async function fetchTPExInst(dateStr) {
 // ★ 快取是否同時包含上市與上櫃資料
 function _instCacheComplete(data) {
   if (!data || Object.keys(data).length === 0) return false;
-  const hasTSE = [...holdStocks, ...watchStocks]
-    .filter(s => s.market === 'tse')
-    .some(s => data[s.code.replace(/\.(TW|TWO)$/i,'')]);
-  const hasOTC = [...holdStocks, ...watchStocks]
-    .filter(s => s.market === 'otc')
-    .some(s => data[s.code.replace(/\.(TW|TWO)$/i,'')]);
+  const tseList = [...holdStocks, ...watchStocks].filter(s => s.code.endsWith('.TW') && !s.code.endsWith('.TWO'));
+  const otcList = [...holdStocks, ...watchStocks].filter(s => s.code.endsWith('.TWO'));
+  const hasTSE = tseList.length === 0 || tseList.every(s => data[s.code.replace(/\.(TW|TWO)$/i,'')]);
+  const hasOTC = otcList.length === 0 || otcList.every(s => data[s.code.replace(/\.(TW|TWO)$/i,'')]);
   return hasTSE && hasOTC;
 }
 
@@ -2737,6 +2736,48 @@ EPS(去年/今年累積)：${fin2.eps_ly??'—'} / ${fin2.eps_ytd??'—'}　毛�
 ${modeInstr}
 `;
 
+  // ── AI 快取檢查 ──
+  const _ck = code + '_' + currentMode;
+  const _cached = aiCache[_ck];
+  if (_cached) {
+    const old2 = document.getElementById('ai-artifact-overlay');
+    if (old2) old2.remove();
+    const src2c = priceData[code]?.src;
+    const srcLabel2c = src2c==='twse-mis'?'TWSE即時':src2c==='twse'?'TWSE收盤':src2c==='finnhub'?'Finnhub':'Yahoo Finance（15分鐘延遲）';
+    const ov2 = document.createElement('div');
+    ov2.id = 'ai-artifact-overlay';
+    ov2.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:600;display:flex;align-items:center;justify-content:center;padding:16px';
+    ov2.onclick = e => { if(e.target===ov2) ov2.remove(); };
+    ov2.innerHTML = `
+    <div style="background:#0d1624;border:1px solid #243554;border-radius:16px;width:100%;max-width:720px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden">
+      <div style="padding:16px 20px;border-bottom:1px solid #1a2840;display:flex;align-items:center;gap:12px;flex-shrink:0">
+        <div style="width:28px;height:28px;background:linear-gradient(135deg,#00c9e8,#0088bb);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#000">AI</div>
+        <div>
+          <div style="font-size:15px;font-weight:700;color:#ffffff;font-family:'JetBrains Mono',monospace">${code.replace('.TWO','').replace('.TW','')} ${name}</div>
+          <div style="font-size:11px;color:#c0d4e8;margin-top:1px">${sector||stock?.sector||''} ｜ <span style="color:${modeColor};font-weight:600">${modeStr}分析</span> ｜ ${srcLabel2c}</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <span style="font-size:10px;color:#8aa8c8">快取：${new Date(_cached.ts).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'})}</span>
+          <button onclick="delete aiCache['${_ck}'];document.getElementById('ai-artifact-overlay').remove();runAI('${code}','${name}','${sector||stock?.sector||''}')" style="background:rgba(0,201,232,.12);border:1px solid rgba(0,201,232,.3);color:#00c9e8;font-size:11px;cursor:pointer;padding:4px 10px;border-radius:5px">🔄 重新分析</button>
+          <button onclick="document.getElementById('ai-artifact-overlay').remove()" style="background:rgba(61,85,112,.3);border:1px solid #3d5570;color:#c0d4e8;font-size:13px;cursor:pointer;padding:4px 14px;border-radius:5px;line-height:1.5">✕ 關閉</button>
+        </div>
+      </div>
+      <div style="padding:10px 20px;background:#111827;border-bottom:1px solid #1a2840;display:flex;gap:16px;flex-wrap:wrap;flex-shrink:0">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:${pd?.pct!=null?(pd.pct>=0?'#00e676':'#ff4f4f'):'#c0d4e8'}">${pd?fmt(pd.price,2):'—'} ${pd?.pct!=null?'('+fmtP(pd.pct)+')':''}</span>
+        <span style="font-size:11px;color:#c0d4e8">量 ${pd?fmt(pd.vol,0)+'張':'—'}</span>
+        <span style="font-size:11px;color:#c0d4e8">區間 ${pd?pd.low+'～'+pd.high:'—'}</span>
+        <span style="font-size:11px;color:#c0d4e8">評分 <b style="color:${sc.score>=70?'#00e676':sc.score>=50?'#ffab00':'#ff4f4f'}">${sc.score}</b>/100</span>
+      </div>
+      <div id="ai-artifact-body" style="padding:20px;overflow-y:auto;flex:1;font-size:13px;line-height:1.85;color:#c0d4e8">${_cached.html}</div>
+      <div style="padding:10px 20px;border-top:1px solid #1a2840;font-size:10px;color:#8aa8c8;flex-shrink:0;display:flex;justify-content:space-between;align-items:center">
+        <span>⚠ 分析僅供參考，投資請自行判斷風險</span>
+        <button onclick="document.getElementById('ai-artifact-overlay').remove()" style="font-size:11px;padding:4px 14px;background:rgba(0,201,232,.09);border:1px solid rgba(0,201,232,.25);color:#00c9e8;border-radius:5px;cursor:pointer">關閉</button>
+      </div>
+    </div>`;
+    document.body.appendChild(ov2);
+    return;
+  }
+
   // ── 建立 Artifact 視窗 ──
   // 移除舊視窗
   const old = document.getElementById('ai-artifact-overlay');
@@ -2859,12 +2900,14 @@ ${modeInstr}
     const html = txt
       .replace(/【([^】]+)】/g, '<div style="margin-top:16px;margin-bottom:6px;padding:6px 12px;background:rgba(0,201,232,.08);border-left:3px solid #00c9e8;border-radius:0 6px 6px 0;font-weight:600;color:#7ac8e8;font-size:13px">$1</div>')
       .split(NL).join('<br>');
-    body.innerHTML = html +
+    const _finalHtml = html +
       `<div style="margin-top:14px;padding-top:10px;border-top:1px solid #1a2840;display:flex;gap:6px;flex-wrap:wrap">
         ${(SIGS[code]||[]).map(s=>`<span style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid rgba(0,201,232,.2);color:#00c9e8;background:rgba(0,201,232,.06)">${s}</span>`).join('')}
         <span style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid rgba(0,230,118,.2);color:#00e676;background:rgba(0,230,118,.06)">Gemini 2.5 Flash</span>
         <span style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid rgba(255,171,0,.2);color:#ffab00;background:rgba(255,171,0,.06)">評分 ${sc.score}/100</span>
       </div>`;
+    body.innerHTML = _finalHtml;
+    aiCache[_ck] = {html: _finalHtml, ts: Date.now()};
     setDot('dot-ai', 'ok');
   } catch(e) {
     body.innerHTML = `<div style="color:#ff8a80;font-size:12px">⚠ Gemini API 錯誤：${e.message}</div>
