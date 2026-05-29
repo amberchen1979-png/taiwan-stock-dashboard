@@ -969,6 +969,11 @@ async function fetchWithRetry(url, options={}, maxRetry=3, delay=2000) {
 
 async function fetchTWSEInst(dateStr) {
   // ★ 方案A：Vercel Proxy（優先，server端無CORS限制）— 最多重試2次
+  // 只傳上市(tse)股代號，server端過濾後大幅縮減payload
+  const _tseCodes = [...holdStocks, ...watchStocks]
+    .filter(s => s.market === 'tse')
+    .map(s => s.code.replace(/\.(TW|TWO)$/i, ''))
+    .filter(Boolean).join(',');
   if (VERCEL_PROXY_URL) {
     const _t86Timeouts = [30000, 35000];
     for (let _attempt = 0; _attempt < _t86Timeouts.length; _attempt++) {
@@ -977,7 +982,8 @@ async function fetchTWSEInst(dateStr) {
           addLog('warn', `Vercel T86 第${_attempt}次失敗，2秒後重試（timeout=${_t86Timeouts[_attempt]}ms）…`);
           await new Promise(r => setTimeout(r, 2000));
         }
-        const vUrl = `${VERCEL_PROXY_URL}/api/twse?type=t86&date=${dateStr}`;
+        const _codesParam = _tseCodes ? `&codes=${encodeURIComponent(_tseCodes)}` : '';
+        const vUrl = `${VERCEL_PROXY_URL}/api/twse?type=t86&date=${dateStr}${_codesParam}`;
         const r = await fetch(vUrl, {signal: AbortSignal.timeout(_t86Timeouts[_attempt])});
         if (r.ok) {
           const j = await r.json();
@@ -1043,11 +1049,18 @@ async function fetchTPExInst(dateStr) {
   const year = parseInt(dateStr.slice(0,4)) - 1911;
   const tpDate = year+'/'+dateStr.slice(4,6)+'/'+dateStr.slice(6,8);
 
+  // 只傳上櫃(otc)股代號，server端過濾後大幅縮減payload
+  const _otcCodes = [...holdStocks, ...watchStocks]
+    .filter(s => s.market === 'otc')
+    .map(s => s.code.replace(/\.(TW|TWO)$/i, ''))
+    .filter(Boolean).join(',');
+
   // ★ 方案A：Vercel Proxy（優先，server端無CORS限制）
   if (VERCEL_PROXY_URL) {
     try {
-      const vUrl = `${VERCEL_PROXY_URL}/api/tpex?date=${encodeURIComponent(tpDate)}`;
-      const r = await fetch(vUrl, {signal: AbortSignal.timeout(12000)});
+      const _codesParam = _otcCodes ? `&codes=${encodeURIComponent(_otcCodes)}` : '';
+      const vUrl = `${VERCEL_PROXY_URL}/api/tpex?date=${encodeURIComponent(tpDate)}${_codesParam}`;
+      const r = await fetch(vUrl, {signal: AbortSignal.timeout(20000)});
       if (r.ok) {
         const j = await r.json();
         const rows = j.tables?.[0]?.data || j.aaData || [];
@@ -2753,16 +2766,23 @@ ${modeInstr}
   }
 
   try {
-    // ── 自動補齊技術指標與法人資料（確保資料完整再送 Gemini）──
+    // ── 自動補齊技術指標與法人資料（硬性 15s timeout，逾時則使用現有資料繼續）──
+    const _timeout15 = ms => new Promise(r => setTimeout(r, ms));
     if (!techCache[code]) {
-      body.innerHTML = `<div style="text-align:center;padding:20px;color:#8aa8c8;font-size:13px">⟳ 補抓技術指標中，請稍候…</div>`;
-      const _ind = await fetchTechIndicators(code).catch(()=>null);
+      body.innerHTML = `<div style="text-align:center;padding:20px;color:#8aa8c8;font-size:13px">⟳ 補抓技術指標中（最多15秒）…</div>`;
+      const _ind = await Promise.race([
+        fetchTechIndicators(code).catch(()=>null),
+        _timeout15(15000).then(()=>null)
+      ]);
       if (_ind) { techCache[code]=_ind; SIGS[code]=buildSigTags(code,_ind); if(_ind.closes?.length>=2) SPARK[code]=_ind.closes.slice(-5); }
     }
     const _cno = code.replace('.TWO','').replace('.TW','');
     if (!instCache.data?.[_cno]) {
-      body.innerHTML = `<div style="text-align:center;padding:20px;color:#8aa8c8;font-size:13px">⟳ 補抓三大法人資料中，請稍候…</div>`;
-      await fetchInstitutional().catch(()=>{});
+      body.innerHTML = `<div style="text-align:center;padding:20px;color:#8aa8c8;font-size:13px">⟳ 補抓三大法人資料中（最多15秒）…</div>`;
+      await Promise.race([
+        fetchInstitutional().catch(()=>{}),
+        _timeout15(15000)
+      ]);
     }
     body.innerHTML = `<div style="text-align:center;padding:20px;color:#8aa8c8;font-size:13px"><div class="dots"><span></span><span></span><span></span></div>&nbsp; Gemini AI 分析中（資料已補齊）…</div>`;
 
