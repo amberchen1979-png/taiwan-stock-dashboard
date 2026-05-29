@@ -999,7 +999,7 @@ function toRocDate(yyyymmdd) {
   return yr + '/' + yyyymmdd.slice(4,6) + '/' + yyyymmdd.slice(6,8);
 }
 
-// ★ TWSE T86 傳今日日期即可，官方自動回傳最近有效交易日資料
+// ★ TWSE T86：14:45 前傳前一交易日，14:45 後傳今日（空則 fallback 一次）
 async function fetchTWSEInst(dateStr) {
   const _tseCodes = [...holdStocks, ...watchStocks]
     .filter(s => s.market === 'tse')
@@ -1008,18 +1008,24 @@ async function fetchTWSEInst(dateStr) {
   const _codesParam = _tseCodes ? `&codes=${encodeURIComponent(_tseCodes)}` : '';
   const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
 
-  // 方案A：Vercel Proxy（傳今日日期，TWSE 自動 fallback 至最近交易日）
+  const _now = new Date();
+  const _afterClose = _now.getHours() > 14 || (_now.getHours() === 14 && _now.getMinutes() >= 45);
+  const _candidates = _afterClose ? [dateStr, prevTradingDay(dateStr)] : [prevTradingDay(dateStr)];
+
+  for (const _ds of _candidates) {
+    addLog('info', `TWSE三大法人查詢：${_ds}`);
+
+  // 方案A：Vercel Proxy
   if (VERCEL_PROXY_URL) {
     try {
-      const vUrl = `${VERCEL_PROXY_URL}/api/twse?type=t86&date=${dateStr}${_codesParam}`;
-      addLog('info', `TWSE三大法人查詢：${dateStr}`);
+      const vUrl = `${VERCEL_PROXY_URL}/api/twse?type=t86&date=${_ds}${_codesParam}`;
       const r = await fetch(vUrl, {signal: AbortSignal.timeout(30000)});
       if (r.ok) {
         const j = await r.json();
         if (j?.stat === 'OK' && Array.isArray(j?.data) && j.data.length > 0) {
           const result = {};
           j.data.forEach(row => {
-            const no = String(row[0]||'').trim();
+            const no = String(row[0]||'').trim().substring(0, 4); // 只取前4碼，消除名稱混雜
             if (no) result[no] = {f:toZ(row[4]), i:toZ(row[10]), d:toZ(row[17]), net:toZ(row[18]), src:'twse'};
           });
           if (Object.keys(result).length > 0) {
@@ -1032,7 +1038,7 @@ async function fetchTWSEInst(dateStr) {
   }
 
   // 方案B：CORS Proxy 備援
-  const _url = 'https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date='+dateStr+'&selectType=ALLBUT0999';
+  const _url = 'https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date='+_ds+'&selectType=ALLBUT0999';
   for (const proxy of [
     'https://corsproxy.io/?'+encodeURIComponent(_url),
     'https://api.allorigins.win/raw?url='+encodeURIComponent(_url),
@@ -1044,16 +1050,17 @@ async function fetchTWSEInst(dateStr) {
       if (j?.stat !== 'OK' || !Array.isArray(j?.data) || j.data.length === 0) continue;
       const result = {};
       j.data.forEach(row => {
-        const no = String(row[0]||'').trim();
+        const no = String(row[0]||'').trim().substring(0, 4); // 前4碼
         if (no) result[no] = {f:toZ(row[4]), i:toZ(row[10]), d:toZ(row[17]), net:toZ(row[18]), src:'twse'};
       });
       if (Object.keys(result).length > 0) {
-        addLog('ok', `TWSE三大法人（proxy）：${Object.keys(result).length}筆`);
+        addLog('ok', `TWSE三大法人（proxy ${_ds}）：${Object.keys(result).length}筆`);
         return result;
       }
     } catch(e) {}
   }
-  addLog('warn','TWSE三大法人抓取失敗');
+  } // end for _candidates
+  addLog('warn','TWSE三大法人所有候選日期均無資料');
   return {};
 }
 
