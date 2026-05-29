@@ -1044,80 +1044,85 @@ async function fetchTWSEInst(dateStr) {
   return {};
 }
 
-async function fetchTPExInst(dateStr) {
-  // 民國年轉換：yyyymmdd → yyy/mm/dd
-  const year = parseInt(dateStr.slice(0,4)) - 1911;
-  const tpDate = year+'/'+dateStr.slice(4,6)+'/'+dateStr.slice(6,8);
+// ★ yyyymmdd 往前推 n 個自然日
+function prevDateStr(yyyymmdd, n=1) {
+  const d = new Date(
+    parseInt(yyyymmdd.slice(0,4)),
+    parseInt(yyyymmdd.slice(4,6))-1,
+    parseInt(yyyymmdd.slice(6,8))
+  );
+  d.setDate(d.getDate() - n);
+  return d.getFullYear().toString() +
+    String(d.getMonth()+1).padStart(2,'0') +
+    String(d.getDate()).padStart(2,'0');
+}
 
+async function fetchTPExInst(dateStr) {
   // 只傳上櫃(otc)股代號，server端過濾後大幅縮減payload
   const _otcCodes = [...holdStocks, ...watchStocks]
     .filter(s => s.market === 'otc')
     .map(s => s.code.replace(/\.(TW|TWO)$/i, ''))
     .filter(Boolean).join(',');
+  const _codesParam = _otcCodes ? `&codes=${encodeURIComponent(_otcCodes)}` : '';
 
-  // ★ 方案A：Vercel Proxy（優先，server端無CORS限制）
-  if (VERCEL_PROXY_URL) {
-    try {
-      const _codesParam = _otcCodes ? `&codes=${encodeURIComponent(_otcCodes)}` : '';
-      const vUrl = `${VERCEL_PROXY_URL}/api/tpex?date=${encodeURIComponent(tpDate)}${_codesParam}`;
-      const r = await fetch(vUrl, {signal: AbortSignal.timeout(20000)});
-      if (r.ok) {
-        const j = await r.json();
-        const rows = j.tables?.[0]?.data || j.aaData || [];
-        if (rows.length > 0) {
-          const result = {};
-          const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
-          rows.forEach(row => {
-            const no = (row[0]||'').trim();
-            if (!no || no.length < 4) return;
-            result[no] = {
-              f:   toZ(row[4]),
-              i:   toZ(row[7]),
-              d:   toZ(row[13]),
-              net: toZ(row[23]),
-              src: 'tpex'
-            };
-          });
-          if (Object.keys(result).length > 0) {
-            addLog('ok', `✓ TPEx三大法人（Vercel）：${Object.keys(result).length}筆`);
+  // ★ TPEx 三大法人每日約 19:00 後更新；盤中/下午查詢需回溯前一交易日
+  //    最多往前找 4 個自然日（涵蓋週末＋連假）
+  const _toResult = (rows) => {
+    const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
+    const result = {};
+    rows.forEach(row => {
+      const no = (row[0]||'').trim();
+      if (!no || no.length < 4) return;
+      result[no] = { f:toZ(row[4]), i:toZ(row[7]), d:toZ(row[13]), net:toZ(row[23]), src:'tpex' };
+    });
+    return Object.keys(result).length > 0 ? result : null;
+  };
+
+  for (let _back = 0; _back <= 4; _back++) {
+    const _ds   = _back === 0 ? dateStr : prevDateStr(dateStr, _back);
+    const _yr   = parseInt(_ds.slice(0,4)) - 1911;
+    const _tpDate = _yr+'/'+_ds.slice(4,6)+'/'+_ds.slice(6,8);
+    if (_back > 0) addLog('info', `TPEx三大法人：${_ds} 無資料，回溯至 ${_tpDate}…`);
+
+    // 方案A：Vercel Proxy
+    if (VERCEL_PROXY_URL) {
+      try {
+        const vUrl = `${VERCEL_PROXY_URL}/api/tpex?date=${encodeURIComponent(_tpDate)}${_codesParam}`;
+        const r = await fetch(vUrl, {signal: AbortSignal.timeout(20000)});
+        if (r.ok) {
+          const j = await r.json();
+          const rows = j.tables?.[0]?.data || j.aaData || [];
+          const result = _toResult(rows);
+          if (result) {
+            addLog('ok', `✓ TPEx三大法人（Vercel ${_tpDate}）：${Object.keys(result).length}筆`);
             return result;
           }
         }
-      }
-    } catch(e) { addLog('warn', `Vercel TPEx失敗: ${e.message}，改用Proxy…`); }
+      } catch(e) { addLog('warn', `Vercel TPEx(${_tpDate})失敗: ${e.message}`); }
+    }
+
+    // 方案B：CORS Proxy 備援
+    const _url = 'https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&d='+_tpDate+'&se=EW&s=0,asc&o=json';
+    const _proxies = [
+      'https://corsproxy.io/?'+encodeURIComponent(_url),
+      'https://api.allorigins.win/raw?url='+encodeURIComponent(_url),
+    ];
+    for (const proxy of _proxies) {
+      const r = await fetchWithRetry(proxy, {}, 1, 1000);
+      if (!r) continue;
+      try {
+        const j = await r.json();
+        const rows = j.tables?.[0]?.data || j.aaData || [];
+        const result = _toResult(rows);
+        if (result) {
+          addLog('ok', `TPEx三大法人（proxy ${_tpDate}）：${Object.keys(result).length}筆`);
+          return result;
+        }
+      } catch(e) {}
+    }
   }
 
-  // ★ 方案B：CORS Proxy 備援（原本邏輯保留）
-  const url = 'https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&d='+tpDate+'&se=EW&s=0,asc&o=json';
-  const proxies = [
-    'https://corsproxy.io/?'+encodeURIComponent(url),
-    'https://api.allorigins.win/raw?url='+encodeURIComponent(url),
-    'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(url),
-  ];
-  for (const proxy of proxies) {
-    const r = await fetchWithRetry(proxy, {}, 2, 2000);
-    if (!r) continue;
-    try {
-      const j = await r.json();
-      const rows = j.tables?.[0]?.data || [];
-      if (rows.length === 0) { addLog('warn','TPEx 當日資料尚未更新'); continue; }
-      const result = {};
-      const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
-      rows.forEach(row => {
-        const no = (row[0]||'').trim();
-        const f   = toZ(row[4]);   // 外資買賣超股數÷1000=張 [4]
-        const i2  = toZ(row[7]);   // 投信買賣超股數÷1000=張 [7]
-        const d2  = toZ(row[13]);  // 自營商含避險÷1000=張 [13]
-        const net = toZ(row[23]);  // 三大法人合計÷1000=張 [23]
-        if (no) result[no] = {f, i:i2, d:d2, net, src:'tpex'};
-      });
-      if (Object.keys(result).length > 0) {
-        addLog('ok','TPEx三大法人：'+Object.keys(result).length+' 筆（allorigins）');
-        return result;
-      }
-    } catch(e) { addLog('warn','TPEx JSON解析失敗：'+e.message); }
-  }
-  addLog('warn','TPEx三大法人資料尚未更新或抓取失敗');
+  addLog('warn','TPEx三大法人近5日均無資料');
   return {};
 }
 
