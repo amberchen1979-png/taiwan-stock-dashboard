@@ -980,101 +980,111 @@ function prevDateStr(yyyymmdd, n=1) {
     String(d.getDate()).padStart(2,'0');
 }
 
-// ★ 依目前時間決定三大法人查詢日期序列
-//    盤中（< 18:00）：當日資料未公布，直接從昨日開始查
-//    盤後（≥ 18:00）：先查今日，若空再查昨日
-//    最多回傳 3 個候選日期（涵蓋週末/假日）
-function getInstQueryDates(todayStr) {
-  const nowHour = new Date().getHours();
-  const start = nowHour < 18 ? 1 : 0; // 盤中從 -1 開始，盤後從 0（今日）開始
-  return [0,1,2].map(i => prevDateStr(todayStr, start + i));
+// ★ 往前找最近一個交易日（跳過週六=6、週日=0）
+function prevTradingDay(yyyymmdd) {
+  let d = new Date(
+    parseInt(yyyymmdd.slice(0,4)),
+    parseInt(yyyymmdd.slice(4,6))-1,
+    parseInt(yyyymmdd.slice(6,8))
+  );
+  do { d.setDate(d.getDate() - 1); } while (d.getDay() === 0 || d.getDay() === 6);
+  return d.getFullYear().toString() +
+    String(d.getMonth()+1).padStart(2,'0') +
+    String(d.getDate()).padStart(2,'0');
 }
 
+// ★ yyyymmdd → 民國格式 yyy/mm/dd（供 TPEx API 使用）
+function toRocDate(yyyymmdd) {
+  const yr = parseInt(yyyymmdd.slice(0,4)) - 1911;
+  return yr + '/' + yyyymmdd.slice(4,6) + '/' + yyyymmdd.slice(6,8);
+}
+
+// ★ TWSE T86 傳今日日期即可，官方自動回傳最近有效交易日資料
 async function fetchTWSEInst(dateStr) {
   const _tseCodes = [...holdStocks, ...watchStocks]
     .filter(s => s.market === 'tse')
     .map(s => s.code.replace(/\.(TW|TWO)$/i, ''))
     .filter(Boolean).join(',');
   const _codesParam = _tseCodes ? `&codes=${encodeURIComponent(_tseCodes)}` : '';
-  const _dates = getInstQueryDates(dateStr);
+  const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
 
-  for (const _ds of _dates) {
-    addLog('info', `TWSE三大法人查詢日期：${_ds}`);
-
-    // 方案A：Vercel Proxy
-    if (VERCEL_PROXY_URL) {
-      try {
-        const vUrl = `${VERCEL_PROXY_URL}/api/twse?type=t86&date=${_ds}${_codesParam}`;
-        const r = await fetch(vUrl, {signal: AbortSignal.timeout(30000)});
-        if (r.ok) {
-          const j = await r.json();
-          if (j?.stat === 'OK' && Array.isArray(j?.data) && j.data.length > 0) {
-            const result = {};
-            const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
-            j.data.forEach(row => {
-              const no = (row[0]||'').trim();
-              if (no) result[no] = {f:toZ(row[4]), i:toZ(row[10]), d:toZ(row[17]), net:toZ(row[18]), src:'twse'};
-            });
-            if (Object.keys(result).length > 0) {
-              addLog('ok', `✓ TWSE三大法人（Vercel ${_ds}）：${Object.keys(result).length}筆`);
-              return result;
-            }
+  // 方案A：Vercel Proxy（傳今日日期，TWSE 自動 fallback 至最近交易日）
+  if (VERCEL_PROXY_URL) {
+    try {
+      const vUrl = `${VERCEL_PROXY_URL}/api/twse?type=t86&date=${dateStr}${_codesParam}`;
+      addLog('info', `TWSE三大法人查詢：${dateStr}`);
+      const r = await fetch(vUrl, {signal: AbortSignal.timeout(30000)});
+      if (r.ok) {
+        const j = await r.json();
+        if (j?.stat === 'OK' && Array.isArray(j?.data) && j.data.length > 0) {
+          const result = {};
+          j.data.forEach(row => {
+            const no = String(row[0]||'').trim();
+            if (no) result[no] = {f:toZ(row[4]), i:toZ(row[10]), d:toZ(row[17]), net:toZ(row[18]), src:'twse'};
+          });
+          if (Object.keys(result).length > 0) {
+            addLog('ok', `✓ TWSE三大法人（Vercel）：${Object.keys(result).length}筆`);
+            return result;
           }
         }
-      } catch(e) { addLog('warn', `Vercel TWSE(${_ds})失敗: ${e.message}`); }
-    }
-
-    // 方案B：CORS Proxy 備援
-    const _url = 'https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date='+_ds+'&selectType=ALLBUT0999';
-    const _proxies = [
-      'https://corsproxy.io/?'+encodeURIComponent(_url),
-      'https://api.allorigins.win/raw?url='+encodeURIComponent(_url),
-    ];
-    for (const proxy of _proxies) {
-      const r = await fetchWithRetry(proxy, {}, 1, 1000);
-      if (!r) continue;
-      try {
-        const j = await r.json();
-        if (j?.stat !== 'OK' || !Array.isArray(j?.data) || j.data.length === 0) continue;
-        const result = {};
-        const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
-        j.data.forEach(row => {
-          const no = (row[0]||'').trim();
-          if (no) result[no] = {f:toZ(row[4]), i:toZ(row[10]), d:toZ(row[17]), net:toZ(row[18]), src:'twse'};
-        });
-        if (Object.keys(result).length > 0) {
-          addLog('ok', `TWSE三大法人（proxy ${_ds}）：${Object.keys(result).length}筆`);
-          return result;
-        }
-      } catch(e) {}
-    }
+      }
+    } catch(e) { addLog('warn', `Vercel TWSE失敗: ${e.message}，改用Proxy…`); }
   }
-  addLog('warn','TWSE三大法人所有日期均無資料');
+
+  // 方案B：CORS Proxy 備援
+  const _url = 'https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date='+dateStr+'&selectType=ALLBUT0999';
+  for (const proxy of [
+    'https://corsproxy.io/?'+encodeURIComponent(_url),
+    'https://api.allorigins.win/raw?url='+encodeURIComponent(_url),
+  ]) {
+    const r = await fetchWithRetry(proxy, {}, 1, 1000);
+    if (!r) continue;
+    try {
+      const j = await r.json();
+      if (j?.stat !== 'OK' || !Array.isArray(j?.data) || j.data.length === 0) continue;
+      const result = {};
+      j.data.forEach(row => {
+        const no = String(row[0]||'').trim();
+        if (no) result[no] = {f:toZ(row[4]), i:toZ(row[10]), d:toZ(row[17]), net:toZ(row[18]), src:'twse'};
+      });
+      if (Object.keys(result).length > 0) {
+        addLog('ok', `TWSE三大法人（proxy）：${Object.keys(result).length}筆`);
+        return result;
+      }
+    } catch(e) {}
+  }
+  addLog('warn','TWSE三大法人抓取失敗');
   return {};
 }
 
+// ★ TPEx 需明確日期；14:45 前精準帶前一交易日，14:45 後帶今日（空則 fallback 一次）
 async function fetchTPExInst(dateStr) {
   const _otcCodes = [...holdStocks, ...watchStocks]
     .filter(s => s.market === 'otc')
     .map(s => s.code.replace(/\.(TW|TWO)$/i, ''))
     .filter(Boolean).join(',');
   const _codesParam = _otcCodes ? `&codes=${encodeURIComponent(_otcCodes)}` : '';
-  const _dates = getInstQueryDates(dateStr);
+
+  const _now = new Date();
+  const _afterClose = _now.getHours() > 14 || (_now.getHours() === 14 && _now.getMinutes() >= 45);
+  // 盤後：[今日, 前交易日]；盤中：[前交易日]（跳過週末）
+  const _candidates = _afterClose
+    ? [dateStr, prevTradingDay(dateStr)]
+    : [prevTradingDay(dateStr)];
 
   const _toResult = (rows) => {
     const toZ = s => Math.trunc(parseInt((s||'0').replace(/,/g,''))||0) / 1000 | 0;
     const result = {};
     rows.forEach(row => {
-      const no = (row[0]||'').trim();
+      const no = String(row[0]||'').trim();
       if (!no || no.length < 4) return;
       result[no] = {f:toZ(row[4]), i:toZ(row[7]), d:toZ(row[13]), net:toZ(row[23]), src:'tpex'};
     });
     return Object.keys(result).length > 0 ? result : null;
   };
 
-  for (const _ds of _dates) {
-    const _yr = parseInt(_ds.slice(0,4)) - 1911;
-    const _tpDate = _yr+'/'+_ds.slice(4,6)+'/'+_ds.slice(6,8);
+  for (const _ds of _candidates) {
+    const _tpDate = toRocDate(_ds); // ★ 強制轉換為民國格式
     addLog('info', `TPEx三大法人查詢日期：${_tpDate}`);
 
     // 方案A：Vercel Proxy
@@ -1119,17 +1129,29 @@ async function fetchTPExInst(dateStr) {
   return {};
 }
 
+// ★ 快取是否同時包含上市與上櫃資料
+function _instCacheComplete(data) {
+  if (!data || Object.keys(data).length === 0) return false;
+  const hasTSE = [...holdStocks, ...watchStocks]
+    .filter(s => s.market === 'tse')
+    .some(s => data[s.code.replace(/\.(TW|TWO)$/i,'')]);
+  const hasOTC = [...holdStocks, ...watchStocks]
+    .filter(s => s.market === 'otc')
+    .some(s => data[s.code.replace(/\.(TW|TWO)$/i,'')]);
+  return hasTSE && hasOTC;
+}
+
 async function fetchInstitutional() {
   const today = getTodayDateStr();
-  // 先從記憶體快取讀
-  if (instCache.date === today && Object.keys(instCache.data||{}).length > 0) {
+  // 記憶體快取：必須同時含 TSE + OTC 才命中
+  if (instCache.date === today && _instCacheComplete(instCache.data)) {
     addLog('info','三大法人使用記憶體快取（'+Object.keys(instCache.data).length+' 筆）');
     return instCache.data;
   }
-  // 再從 localStorage 讀
+  // localStorage 快取：同上
   try {
     const saved = JSON.parse(localStorage.getItem('inst_cache')||'{}');
-    if (saved.date === today && Object.keys(saved.data||{}).length > 0) {
+    if (saved.date === today && _instCacheComplete(saved.data)) {
       instCache = saved;
       addLog('info','三大法人讀取本地快取（'+Object.keys(saved.data).length+' 筆）');
       return saved.data;
@@ -1139,10 +1161,14 @@ async function fetchInstitutional() {
   addLog('info','抓取三大法人（'+today+'）…');
   const [twse, tpex] = await Promise.all([fetchTWSEInst(today), fetchTPExInst(today)]);
   const merged = {...twse, ...tpex};
-  if (Object.keys(merged).length > 0) {
+  if (_instCacheComplete(merged)) {
     instCache = {date: today, data: merged};
     try { localStorage.setItem('inst_cache', JSON.stringify(instCache)); } catch(e) {}
-    addLog('ok','三大法人合計：'+Object.keys(merged).length+' 筆已快取');
+    addLog('ok','三大法人合計：'+Object.keys(merged).length+' 筆已快取（TSE+OTC齊全）');
+  } else if (Object.keys(merged).length > 0) {
+    // 部分資料不寫快取，但仍回傳供本次使用
+    addLog('warn','三大法人資料不完整（僅'+Object.keys(merged).length+'筆），不寫快取');
+    instCache = {date: '', data: merged}; // date 清空，下次重抓
   }
   return merged;
 }
