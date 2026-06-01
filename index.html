@@ -914,23 +914,24 @@ async function fetchTWSEClose(code) {
             prev  = prevDay ? parseClose(prevDay) : null;
             addLog('ok', `TWSE盤後 ${no}: 今收=${price} 昨收=${prev} [${latest[0]}]`);
           } else {
-            // 盤前/中：最後一筆=昨收（前一結算日），以此為當前參考價
-            price = parseClose(latest);
-            prev  = prevDay ? parseClose(prevDay) : null;
-            addLog('info', `TWSE盤前 ${no}: 最新結算日=${price} [${latest[0]}]（今日未收盤）`);
+            // 【盤前/盤中/清算前】最後一筆是「昨日收盤」，現價交給 MIS/Yahoo 處理
+            price = null;                                    // 今日未收盤，price 不填
+            prev  = parseClose(latest);                      // 最後一筆=昨收
+            addLog('info', `TWSE盤前/中 ${no}: 昨收對齊=${prev} [${latest[0]}]（等待即時價注入）`);
           }
-          high = parseHigh(latest) || price;
-          low  = parseLow(latest)  || price;
+          high = parseHigh(latest) || prev;
+          low  = parseLow(latest)  || prev;
           vol  = parseVol(latest);
           if (rows2.length >= 5) {
             SPARK[code] = rows2.slice(-5).map(r => parseClose(r)).filter(v => v > 0);
           }
         }
 
-        if (!price || price === 0) continue;
-        const chg = (prev && prev > 0) ? +(price - prev).toFixed(2) : null;
-        const pct = (prev && prev > 0 && chg !== null) ? +(chg/prev*100).toFixed(2) : null;
-        return {price, chg, pct, prev: prev||null, vol, high, low, src:'twse'};
+        // price=null 代表盤前/中，仍回傳（攜帶昨收 prev），讓 fetchOne 判斷
+        const chg = (price && price > 0 && prev && prev > 0) ? +(price - prev).toFixed(2) : null;
+        const pct = (price && price > 0 && prev && prev > 0 && chg !== null) ? +(chg/prev*100).toFixed(2) : null;
+        if (!price && !prev) continue;   // 兩個都沒有才真正跳過
+        return {price: price||null, chg, pct, prev: prev||null, vol, high, low, src:'twse'};
       } catch(e) { addLog('warn',`fetchTWSEClose ${code}: ${e.message}`); }
     }
   } catch(e) {}
@@ -1432,9 +1433,16 @@ async function fetchOne(code) {
       //   result.price = 即時價格
       //   result.prev  = 昨收（需要確保正確）
 
-      if (result.src === 'twse') {
-        // 盤後：price 就是昨收，不需要額外補抓
-        // prev 是前天，chg/pct 已正確計算
+      if (result.src === 'twse' && result.price) {
+        // 盤後：price=今收，prev=昨收，chg/pct 已正確計算，不需額外處理
+      } else if (result.src === 'twse' && !result.price) {
+        // 盤前/中：STOCK_DAY 只提供昨收(prev)，price 為 null
+        // 直接把 prev(昨收) 當作展示用參考價，清除漲跌數據
+        result.price = result.prev;   // 昨收作為參考現價
+        result.prev  = null;          // 沒有「前日收」可以顯示
+        result.chg   = null;
+        result.pct   = null;
+        addLog('info', `fetchOne盤前/中 ${code}: 展示昨收=${result.price} 作參考價`);
       } else if (!result.prev || result.prev <= 0) {
         // 盤中：prev 為空，補抓昨收
         const p = await fetchPrevClose(code);
