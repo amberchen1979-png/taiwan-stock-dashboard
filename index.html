@@ -498,7 +498,7 @@ let watchStocks = [
   {code:'2412.TW',  name:'中華電', type:'stock', sector:'電信',    market:'tse'},
   {code:'3022.TW',  name:'威強電', type:'stock', sector:'工業電腦',market:'tse'},
   {code:'1519.TW',  name:'華城',   type:'stock', sector:'電力',    market:'tse'},
-  {code:'2465.TW', name:'麗臺',   type:'stock', sector:'GPU/AI',  market:'tse'},
+  {code:'2465.TW', name:'麗臺',   type:'stock', sector:'GPU/AI',  market:'otc'},
   {code:'3526.TWO', name:'凡甲',   type:'stock', sector:'連接器',  market:'otc'},
   {code:'3004.TW',  name:'豐達科', type:'stock', sector:'電源',    market:'tse'},
   {code:'3653.TW', name:'健策',   type:'stock', sector:'散熱',    market:'tse'},
@@ -566,8 +566,25 @@ const SIGS = {
 };
 
 // ── 近5日走勢（API成功後會更新為真實資料）──────────────
-const sparkFetching = new Set(); // ★ 防止 sparkHTML 重複觸發補抓
-const SPARK = {};  // ★ 修正C：移除硬碼舊資料，全部由 fetchAllPrices 後動態填入
+const SPARK = {
+  '1303.TW':   [64,63.5,63,62.8,62.5],
+  '6261.TWO':   [136,138,140,141,142],
+  '3260.TWO':   [37,37.5,38,38.2,38.5],
+  '5289.TWO':   [230,228,225,220,218],
+  '2374.TW':   [43,43.5,44,45,45.85],
+  '0050.TW':   [195,196,197,198,198.5],
+  '0056.TW':   [36,36.2,36.4,36.6,36.8],
+  '00631L.TW': [91,90,89.5,88.8,88.2],
+  '00981A.TW': [10.4,10.45,10.5,10.55,10.58],
+  '8422.TW':   [268,272,278,282,285],
+  '2412.TW':   [135,135,135.5,135.5,135.5],
+  '3022.TW':   [84,85,86,87,88.5],
+  '1519.TW':   [860,870,880,888,894],
+  '2465.TW':   [36,35,34,33.5,32.5],
+  '3526.TWO':   [150,152,154,156,158],
+  '3004.TW':   [110,111,111.5,112,112.5],
+  '3653.TW':   [180,183,188,193,198],
+};
 
 // ── 財務資料（動態 by Gemini AI + 快取）────────────────────
 // 點「抓取財務」時由 Gemini 自動查詢最新財報，快取在 localStorage
@@ -875,7 +892,6 @@ async function fetchTWSEClose(code) {
       ];
     }
 
-    let _needPrevOverride = false;  // ★ 連假後第一交易日旗標
     for (const url of urls) {
       try {
         const r = await fetch(url, {signal: AbortSignal.timeout(10000)});
@@ -898,46 +914,23 @@ async function fetchTWSEClose(code) {
             prev  = prevDay ? parseClose(prevDay) : null;
             addLog('ok', `TWSE盤後 ${no}: 今收=${price} 昨收=${prev} [${latest[0]}]`);
           } else {
-            // 【盤前/盤中/清算前】最後一筆是「昨日收盤」，現價交給 MIS/Yahoo 處理
-            price = null;                                    // 今日未收盤，price 不填
-            prev  = parseClose(latest);                      // 最後一筆=昨收
-            addLog('info', `TWSE盤前/中 ${no}: 昨收對齊=${prev} [${latest[0]}]（等待即時價注入）`);
+            // 盤前/中：最後一筆=昨收（前一結算日），以此為當前參考價
+            price = parseClose(latest);
+            prev  = prevDay ? parseClose(prevDay) : null;
+            addLog('info', `TWSE盤前 ${no}: 最新結算日=${price} [${latest[0]}]（今日未收盤）`);
           }
-          // ★ 方案B：計算最後結算日與今日差距，判斷是否為連假後第一交易日
-          // latest[0] 格式：民國年 "115/05/29"
-          ;(function() {
-            try {
-              const parts = (latest[0]||'').split('/');
-              if (parts.length === 3) {
-                const lastTradingDate = new Date(
-                  parseInt(parts[0]) + 1911,
-                  parseInt(parts[1]) - 1,
-                  parseInt(parts[2])
-                );
-                const twToday = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
-                twToday.setHours(0,0,0,0);
-                lastTradingDate.setHours(0,0,0,0);
-                const diffDays = Math.round((twToday - lastTradingDate) / 86400000);
-                // 差距 > 1 天 = 中間有非交易日（週末或連假）
-                _needPrevOverride = diffDays > 1;
-                addLog('info', `TWSE日差 ${no}: lastTrade=${latest[0]} diffDays=${diffDays} needOverride=${_needPrevOverride}`);
-              }
-            } catch(e) {}
-          })();
-          high = parseHigh(latest) || prev;
-          low  = parseLow(latest)  || prev;
+          high = parseHigh(latest) || price;
+          low  = parseLow(latest)  || price;
           vol  = parseVol(latest);
           if (rows2.length >= 5) {
             SPARK[code] = rows2.slice(-5).map(r => parseClose(r)).filter(v => v > 0);
           }
         }
 
-        // price=null 代表盤前/中，仍回傳（攜帶昨收 prev），讓 fetchOne 判斷
-        const chg = (price && price > 0 && prev && prev > 0) ? +(price - prev).toFixed(2) : null;
-        const pct = (price && price > 0 && prev && prev > 0 && chg !== null) ? +(chg/prev*100).toFixed(2) : null;
-        if (!price && !prev) continue;   // 兩個都沒有才真正跳過
-        return {price: price||null, chg, pct, prev: prev||null, vol, high, low, src:'twse',
-                needPrevOverride: typeof _needPrevOverride !== 'undefined' ? _needPrevOverride : false};
+        if (!price || price === 0) continue;
+        const chg = (prev && prev > 0) ? +(price - prev).toFixed(2) : null;
+        const pct = (prev && prev > 0 && chg !== null) ? +(chg/prev*100).toFixed(2) : null;
+        return {price, chg, pct, prev: prev||null, vol, high, low, src:'twse'};
       } catch(e) { addLog('warn',`fetchTWSEClose ${code}: ${e.message}`); }
     }
   } catch(e) {}
@@ -1231,18 +1224,20 @@ async function fetchYahoo(code, idx=0) {
     const meta = j?.chart?.result?.[0]?.meta;
     if (!meta) throw new Error('no meta');
     const price = meta.regularMarketPrice ?? meta.previousClose;
-    // ★ 昨收策略：優先用 close 陣列倒數第二筆（實體交易日，不受時區污染）
-    // meta.regularMarketPreviousClose 在連假後週一早上常回傳錯值，不可信
-    const _closes = j?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.filter(v=>v&&v>0) || [];
-    const _prevFromArr = _closes.length >= 2 ? +_closes[_closes.length-2].toFixed(2) : null;
-    const _prevFromMeta = meta.regularMarketPreviousClose > 0 ? meta.regularMarketPreviousClose
-                        : meta.chartPreviousClose > 0 ? meta.chartPreviousClose
-                        : meta.previousClose > 0 ? meta.previousClose
-                        : null;
-    const prev = _prevFromArr || _prevFromMeta || null;
+    // 昨收取值優先順序：
+    // 1. regularMarketPreviousClose（最標準）
+    // 2. chartPreviousClose（range=1d 時等同昨收）
+    // 3. previousClose（舊版欄位）
+    const prev = (meta.regularMarketPreviousClose > 0 ? meta.regularMarketPreviousClose
+               : meta.chartPreviousClose > 0 ? meta.chartPreviousClose
+               : meta.previousClose > 0 ? meta.previousClose
+               : null);
+    const chg=+(price-prev).toFixed(2), pct=prev?+(chg/prev*100).toFixed(2):0;
+    // 不使用 Yahoo 的 closes 更新 SPARK，因為時間對應可能不準確
+    // SPARK 改由 TWSE 月線資料提供（fetchTWSEClose 裡處理）
     // chg/pct
-    const chgY = (price && prev && prev > 0) ? +(price - prev).toFixed(2) : null;
-    const pctY = (price && prev && prev > 0 && chgY !== null) ? +(chgY / prev * 100).toFixed(2) : null;
+    const chgY = (prev && prev > 0) ? +(price - prev).toFixed(2) : null;
+    const pctY = (prev && prev > 0 && chgY !== null) ? +(chgY / prev * 100).toFixed(2) : null;
     return {
       price: +price.toFixed(2),
       chg: chgY, pct: pctY,
@@ -1271,7 +1266,7 @@ async function fetchPrevClose(code) {
   const isTW  = code.endsWith('.TW') || code.endsWith('.TWO');
   if (!isTW) return null;
 
-  // ── 嘗試0：Yahoo Finance close陣列倒數第二筆（最可靠，不受時區污染）──
+  // ── 嘗試0：Yahoo Finance regularMarketPreviousClose（最可靠，上市上櫃都適用）──
   try {
     const yahooCode = isOTC ? no+'.TWO' : no+'.TW';
     for (const pfn of [
@@ -1280,21 +1275,15 @@ async function fetchPrevClose(code) {
       u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
     ]) {
       try {
-        // ★ range=5d 確保有足夠K線（連假後週一至少需要2筆以上）
-        const yurl = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooCode}?interval=1d&range=5d`;
+        const yurl = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooCode}?interval=1d&range=2d`;
         const r = await fetch(pfn(yurl), {signal: AbortSignal.timeout(8000)});
         if (!r.ok) continue;
         const j = await r.json();
-        const closes = j?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.filter(v=>v&&v>0) || [];
-        // ★ 倒數第二筆 = 前一個實體交易日收盤，絕對正確
-        if (closes.length >= 2) {
-          const p = +closes[closes.length-2].toFixed(2);
-          if (p > 0) { addLog('ok', `昨收[Yahoo-arr] ${code}: ${p} (${closes.length}筆)`); return p; }
-        }
-        // 備援：meta欄位（連假後可能不準，但聊勝於無）
         const meta = j?.chart?.result?.[0]?.meta;
         const rmp = parseFloat(meta?.regularMarketPreviousClose);
-        if (rmp > 0) { addLog('ok', `昨收[Yahoo-rmp備援] ${code}: ${rmp}`); return rmp; }
+        if (rmp > 0) { addLog('ok', `昨收[Yahoo-rmp] ${code}: ${rmp}`); return rmp; }
+        const cpc = parseFloat(meta?.chartPreviousClose);
+        if (cpc > 0) { addLog('ok', `昨收[Yahoo-cpc] ${code}: ${cpc}`); return cpc; }
       } catch(e) {}
     }
   } catch(e) {}
@@ -1378,16 +1367,17 @@ async function fetchPrevClose(code) {
           const j = await r.json();
           const meta   = j?.chart?.result?.[0]?.meta;
           const closes = j?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.filter(v=>v&&v>0) || [];
-          // ★ 優先用 closes 倒數第二筆（實體交易日，不受時區污染）
-          if (closes.length >= 2) {
-            const p2 = closes[closes.length - 2];
-            if (p2 > 0) { addLog('ok', `昨收[Yahoo-arr] ${code} range=${range}: ${p2.toFixed(2)}`); return +p2.toFixed(2); }
-          }
-          // 備援：meta欄位
+          // 優先用 regularMarketPreviousClose
           const rmp = parseFloat(meta?.regularMarketPreviousClose);
-          if (rmp > 0) { addLog('ok', `昨收[Yahoo-rmp備援] ${code}: ${rmp}`); return rmp; }
+          if (rmp > 0) { addLog('ok', `昨收[Yahoo-rmp] ${code}: ${rmp}`); return rmp; }
+          // 次選 chartPreviousClose
           const cpc = parseFloat(meta?.chartPreviousClose);
-          if (cpc > 0) { addLog('ok', `昨收[Yahoo-cpc備援] ${code}: ${cpc}`); return cpc; }
+          if (cpc > 0) { addLog('ok', `昨收[Yahoo-cpc] ${code}: ${cpc}`); return cpc; }
+          // 再次選 closes 倒數第2筆（只在有2筆以上時才可信）
+          if (closes.length >= 2 && range !== '1d') {
+            const p2 = closes[closes.length - 2];
+            if (p2 > 0) { addLog('ok', `昨收[Yahoo-closes] ${code}: ${p2.toFixed(2)}`); return +p2.toFixed(2); }
+          }
         } catch(e) {}
       }
     }
@@ -1442,29 +1432,16 @@ async function fetchOne(code) {
       //   result.price = 即時價格
       //   result.prev  = 昨收（需要確保正確）
 
-      if (result.src === 'twse' && result.price) {
-        // 盤後：price=今收，prev=昨收，chg/pct 已正確計算，不需額外處理
-      } else if (result.src === 'twse' && !result.price) {
-        // 盤前/中：STOCK_DAY 只提供昨收(prev)，price 為 null
-        // 直接把 prev(昨收) 當作展示用參考價，清除漲跌數據
-        result.price = result.prev;   // 昨收作為參考現價
-        result.prev  = null;          // 沒有「前日收」可以顯示
-        result.chg   = null;
-        result.pct   = null;
-        addLog('info', `fetchOne盤前/中 ${code}: 展示昨收=${result.price} 作參考價`);
-      } else {
-        // ★ 方案B：只有連假後第一交易日（diffDays>1）才覆蓋 prev
-        // 一般交易日直接信任 MIS d.y，不多餘呼叫 fetchPrevClose
-        const needOverride = result.needPrevOverride === true;
-        if (needOverride) {
-          addLog('info', `fetchOne連假偵測 ${code}: 觸發昨收覆蓋`);
-          const p = await fetchPrevClose(code);
-          if (p && p > 0) {
-            result.prev = p;
-            result.chg  = +(result.price - p).toFixed(2);
-            result.pct  = +(result.chg / p * 100).toFixed(2);
-            addLog('ok', `fetchOne昨收覆蓋 ${code}: prev=${p}`);
-          }
+      if (result.src === 'twse') {
+        // 盤後：price 就是昨收，不需要額外補抓
+        // prev 是前天，chg/pct 已正確計算
+      } else if (!result.prev || result.prev <= 0) {
+        // 盤中：prev 為空，補抓昨收
+        const p = await fetchPrevClose(code);
+        if (p && p > 0) {
+          result.prev = p;
+          result.chg  = +(result.price - p).toFixed(2);
+          result.pct  = +(result.chg / p * 100).toFixed(2);
         }
       }
       return result;
@@ -1646,19 +1623,15 @@ function calcScore(stock, pd) {
 }
 
 function sparkHTML(code) {
-  // ★ 修正A：加入防護 Set，避免重複觸發 & 頁面載入自動抓取
-  // 只有在 fetchAllPrices 未執行中（!loading）且該 code 尚未在補抓中才觸發
+  // 新增個股若無 SPARK 資料，背景觸發抓取
   if (!SPARK[code] || SPARK[code].length === 0) {
-    if (!loading && !sparkFetching.has(code)) {
-      const s = [...holdStocks,...watchStocks].find(x=>x.code===code);
-      if (s && priceData[code]) {
-        // ★ 只有 priceData 已有資料（主流程已跑過）才補抓 SPARK
-        sparkFetching.add(code);
-        fetchTWSEClose(code).then(r=>{
-          sparkFetching.delete(code);
-          if(r) renderTable();
-        });
-      }
+    const s = [...holdStocks,...watchStocks].find(x=>x.code===code);
+    if (s) {
+      const no = code.replace('.TWO','').replace('.TW','');
+      const isOTC = code.endsWith('.TWO');
+      const tw = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
+      const yyyymm = tw.getFullYear()+String(tw.getMonth()+1).padStart(2,'0');
+      fetchTWSEClose(code).then(r=>{ if(r) renderTable(); });
     }
   }
   const d  = SPARK[code] || [];
@@ -3406,40 +3379,23 @@ function importSettings(event) {
 // ── INIT ──────────────────────────────────────────────────
 // ★ 版本號快取清除：若快取版本不符，自動清空inst_cache避免舊錯誤數字
 (function clearOldCache() {
-  // ★ 版本更新時清除快取（版本號異動 → 強制清除所有快取）
-  const CACHE_VER = '28_6';
+  // ★ 版本更新時清除快取
+  const CACHE_VER = '28_5';
   if (localStorage.getItem('cache_ver') !== CACHE_VER) {
     localStorage.removeItem('inst_cache');
-    localStorage.removeItem('fins_cache');
-    localStorage.removeItem('fins_cache_date');
     localStorage.setItem('cache_ver', CACHE_VER);
-    console.log('[INIT] 快取版本更新(28_6)，已清除所有舊快取');
+    console.log('[INIT] 快取版本更新，已清除舊三大法人快取');
   }
-  // ★ 每日自動清除：日期變更時清除 inst_cache + 記憶體快取
+  // ★ 每日自動清除：若快取日期不是今天，或筆數不足200（缺上櫃資料），立即清除
   try {
     const today = (function() {
       const d = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
       return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
     })();
-    // 三大法人：日期不符或筆數不足就清除
     const saved = JSON.parse(localStorage.getItem('inst_cache')||'{}');
     if (saved.date !== today || Object.keys(saved.data||{}).length < 200) {
       localStorage.removeItem('inst_cache');
       console.log('[INIT] 三大法人快取已清除（日期變更或資料不完整）');
-    }
-    // ★ 關鍵修正：日期變更時同步清除記憶體快取（防止週末髒資料殘留）
-    const lastVisit = localStorage.getItem('last_visit_date');
-    if (lastVisit !== today) {
-      // 重置記憶體快取（priceData/techCache 在變數宣告處已初始化為 {}，
-      // 此處用 setTimeout 確保在主程式變數宣告後執行）
-      setTimeout(function() {
-        if (typeof priceData  !== 'undefined') { Object.keys(priceData).forEach(k=>delete priceData[k]); }
-        if (typeof techCache  !== 'undefined') { Object.keys(techCache).forEach(k=>delete techCache[k]); }
-        if (typeof instCache  !== 'undefined') { instCache.date=''; instCache.data={}; }
-        if (typeof aiCache    !== 'undefined') { Object.keys(aiCache).forEach(k=>delete aiCache[k]); }
-        console.log('[INIT] 日期變更，記憶體快取已全部清除（priceData/techCache/aiCache）');
-      }, 0);
-      localStorage.setItem('last_visit_date', today);
     }
   } catch(e) {
     localStorage.removeItem('inst_cache');
