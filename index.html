@@ -498,7 +498,7 @@ let watchStocks = [
   {code:'2412.TW',  name:'中華電', type:'stock', sector:'電信',    market:'tse'},
   {code:'3022.TW',  name:'威強電', type:'stock', sector:'工業電腦',market:'tse'},
   {code:'1519.TW',  name:'華城',   type:'stock', sector:'電力',    market:'tse'},
-  {code:'2465.TW', name:'麗臺',   type:'stock', sector:'GPU/AI',  market:'otc'},
+  {code:'2465.TW', name:'麗臺',   type:'stock', sector:'GPU/AI',  market:'tse'},
   {code:'3526.TWO', name:'凡甲',   type:'stock', sector:'連接器',  market:'otc'},
   {code:'3004.TW',  name:'豐達科', type:'stock', sector:'電源',    market:'tse'},
   {code:'3653.TW', name:'健策',   type:'stock', sector:'散熱',    market:'tse'},
@@ -566,25 +566,8 @@ const SIGS = {
 };
 
 // ── 近5日走勢（API成功後會更新為真實資料）──────────────
-const SPARK = {
-  '1303.TW':   [64,63.5,63,62.8,62.5],
-  '6261.TWO':   [136,138,140,141,142],
-  '3260.TWO':   [37,37.5,38,38.2,38.5],
-  '5289.TWO':   [230,228,225,220,218],
-  '2374.TW':   [43,43.5,44,45,45.85],
-  '0050.TW':   [195,196,197,198,198.5],
-  '0056.TW':   [36,36.2,36.4,36.6,36.8],
-  '00631L.TW': [91,90,89.5,88.8,88.2],
-  '00981A.TW': [10.4,10.45,10.5,10.55,10.58],
-  '8422.TW':   [268,272,278,282,285],
-  '2412.TW':   [135,135,135.5,135.5,135.5],
-  '3022.TW':   [84,85,86,87,88.5],
-  '1519.TW':   [860,870,880,888,894],
-  '2465.TW':   [36,35,34,33.5,32.5],
-  '3526.TWO':   [150,152,154,156,158],
-  '3004.TW':   [110,111,111.5,112,112.5],
-  '3653.TW':   [180,183,188,193,198],
-};
+const sparkFetching = new Set(); // ★ 防止 sparkHTML 重複觸發補抓
+const SPARK = {};  // ★ 修正C：移除硬碼舊資料，全部由 fetchAllPrices 後動態填入
 
 // ── 財務資料（動態 by Gemini AI + 快取）────────────────────
 // 點「抓取財務」時由 Gemini 自動查詢最新財報，快取在 localStorage
@@ -1663,15 +1646,19 @@ function calcScore(stock, pd) {
 }
 
 function sparkHTML(code) {
-  // 新增個股若無 SPARK 資料，背景觸發抓取
+  // ★ 修正A：加入防護 Set，避免重複觸發 & 頁面載入自動抓取
+  // 只有在 fetchAllPrices 未執行中（!loading）且該 code 尚未在補抓中才觸發
   if (!SPARK[code] || SPARK[code].length === 0) {
-    const s = [...holdStocks,...watchStocks].find(x=>x.code===code);
-    if (s) {
-      const no = code.replace('.TWO','').replace('.TW','');
-      const isOTC = code.endsWith('.TWO');
-      const tw = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Taipei'}));
-      const yyyymm = tw.getFullYear()+String(tw.getMonth()+1).padStart(2,'0');
-      fetchTWSEClose(code).then(r=>{ if(r) renderTable(); });
+    if (!loading && !sparkFetching.has(code)) {
+      const s = [...holdStocks,...watchStocks].find(x=>x.code===code);
+      if (s && priceData[code]) {
+        // ★ 只有 priceData 已有資料（主流程已跑過）才補抓 SPARK
+        sparkFetching.add(code);
+        fetchTWSEClose(code).then(r=>{
+          sparkFetching.delete(code);
+          if(r) renderTable();
+        });
+      }
     }
   }
   const d  = SPARK[code] || [];
