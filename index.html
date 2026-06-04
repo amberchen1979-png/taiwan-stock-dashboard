@@ -567,6 +567,7 @@ const SIGS = {
 
 // ── 近5日走勢（API成功後會更新為真實資料）──────────────
 const sparkFetching = new Set(); // ★ 防止 sparkHTML 重複觸發補抓
+const sparkDone = new Set();     // ★ 防止失敗後無限重試（success or fail，只補一次）
 const SPARK = {};  // ★ 修正C：移除硬碼舊資料，全部由 fetchAllPrices 後動態填入
 
 // ── 財務資料（動態 by Gemini AI + 快取）────────────────────
@@ -1491,6 +1492,7 @@ async function fetchAllPrices() {
   btn.innerHTML = '<span class="spin">↻</span> 抓取中…';
   setDot('dot-finnhub','off'); setDot('dot-proxy','off');
   clearLog();
+  sparkDone.clear(); // ★ 手動重新抓取時，允許重新補抓 SPARK
   addLog('info', `開始抓取股價（${finnhubKey?'Finnhub主/Yahoo備':'Yahoo Finance備援'}），共 ${holdStocks.length + watchStocks.length} 檔…`);
   // ★ 先等三大法人抓完，確保 instCache 有資料再渲染
   addLog('info','正在抓取三大法人…');
@@ -1649,13 +1651,14 @@ function sparkHTML(code) {
   // ★ 修正A：加入防護 Set，避免重複觸發 & 頁面載入自動抓取
   // 只有在 fetchAllPrices 未執行中（!loading）且該 code 尚未在補抓中才觸發
   if (!SPARK[code] || SPARK[code].length === 0) {
-    if (!loading && !sparkFetching.has(code)) {
+    if (!loading && !sparkFetching.has(code) && !sparkDone.has(code)) {
       const s = [...holdStocks,...watchStocks].find(x=>x.code===code);
       if (s && priceData[code]) {
         // ★ 只有 priceData 已有資料（主流程已跑過）才補抓 SPARK
         sparkFetching.add(code);
         fetchTWSEClose(code).then(r=>{
           sparkFetching.delete(code);
+          sparkDone.add(code); // ★ 無論成敗標記，不再自動重試（按抓取報價可重置）
           if(r) renderTable();
         });
       }
@@ -3410,10 +3413,9 @@ function importSettings(event) {
   const CACHE_VER = '28_6';
   if (localStorage.getItem('cache_ver') !== CACHE_VER) {
     localStorage.removeItem('inst_cache');
-    localStorage.removeItem('fins_cache');
-    localStorage.removeItem('fins_cache_date');
+    // ★ 注意：fins_cache 不在此清除，Gemini已抓取的財務資料應永久保留
     localStorage.setItem('cache_ver', CACHE_VER);
-    console.log('[INIT] 快取版本更新(28_6)，已清除所有舊快取');
+    console.log('[INIT] 快取版本更新(28_6)，已清除法人快取（財務快取保留）');
   }
   // ★ 每日自動清除：日期變更時清除 inst_cache + 記憶體快取
   try {
